@@ -1,0 +1,296 @@
+/* ==========================================================================
+   班主任工作台 - 班级宠物养成与彩蛋激励系统 (Pet CSS)
+   ========================================================================== */
+
+.pet-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* 宠物顶部横幅 */
+.pet-banner {
+  background: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
+  border-radius: var(--radius-xl);
+  padding: 22px 28px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 10px 20px -5px rgba(236, 72, 153, 0.3);
+}
+
+.pet-banner h2 {
+  font-size: 22px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.pet-banner p {
+  font-size: 13.5px;
+  opacity: 0.92;
+}
+
+.pet-banner-stats {
+  display: flex;
+  gap: 20px;
+}
+
+.pet-banner-stat-box {
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(6px);
+  padding: 8px 16px;
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.pet-banner-stat-num {
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.pet-banner-stat-lbl {
+  font-size: 11px;
+  opacity: 0.9;
+}
+
+/* 学生与宠物卡片网格 */
+.pets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.pet-card {
+  background: #ffffff;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-color);
+  padding: 18px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  transition: var(--transition);
+  overflow: hidden;
+}
+
+.pet-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: #ec4899;
+}
+
+.pet-card-owner {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pet-card-score {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #f59e0b;
+  background: #fef3c7;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.pet-avatar-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fce7f3 0%, #ede9fe 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 42px;
+  margin: 22px 0 10px;
+  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.15);
+  animation: petBounce 3s ease-in-out infinite;
+}
+
+@keyframes petBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.pet-card-name {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+
+.pet-card-species {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}
+
+.pet-stat-bars {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pet-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+}
+
+.pet-bar-label {
+  width: 38px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.pet-progress-bg {
+  flex: 1;
+  height: 8px;
+  background-color: #f1f5f9;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pet-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.fill-hunger { background: linear-gradient(90deg, #f59e0b, #ea580c); }
+.fill-happy { background: linear-gradient(90deg, #ec4899, #d946ef); }
+.fill-exp { background: linear-gradient(90deg, #3b82f6, #6366f1); }
+
+.pet-interact-btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.pet-interact-btn:hover {
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+  transform: translateY(-1px);
+}
+
+/* 宠物商店卡片网格 */
+.pet-shop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 10px 0;
+}
+
+.shop-item-card {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  text-align: center;
+  background: #fff;
+  transition: var(--transition);
+}
+
+.shop-item-card:hover {
+  border-color: #f59e0b;
+  box-shadow: var(--shadow-md);
+}
+
+.shop-item-icon {
+  font-size: 32px;
+  margin-bottom: 6px;
+}
+
+.shop-item-name {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.shop-item-desc {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 8px;
+  min-height: 28px;
+}
+
+.shop-item-cost {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #d97706;
+  margin-bottom: 8px;
+}
+
+/* 宠物排行榜 */
+.pet-ranking-top3 {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.top-pet-podium {
+  background: white;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-color);
+  padding: 16px;
+  text-align: center;
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+}
+
+.top-pet-podium.rank-1 {
+  height: 200px;
+  border-color: #f59e0b;
+  background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+}
+
+.top-pet-podium.rank-2 {
+  height: 175px;
+  border-color: #94a3b8;
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.top-pet-podium.rank-3 {
+  height: 155px;
+  border-color: #b45309;
+  background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
+}
+
+.rank-crown {
+  font-size: 24px;
+  position: absolute;
+  top: -14px;
+}

@@ -1,0 +1,3355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>小学班主任工作台 - 智能班级管理系统</title>
+  <link rel="stylesheet" href="css/main.css?v=20260905_v3">
+  <link rel="stylesheet" href="css/components.css?v=20260905_v3">
+  <link rel="stylesheet" href="css/pet.css?v=20260905_v3">
+  <link rel="stylesheet" href="css/smartboard.css?v=20260911_v10">
+  <script src="js/lunar.js?v=20260906_v1"></script>
+  <script>
+    // 全局实时系统时间与学期开学教学周次动态计算引擎 (集成中国自然教学周历法与通用农历)
+    window.getCurrentDateInfo = function (customDate) {
+      var now = customDate ? new Date(customDate) : new Date();
+      var year = now.getFullYear();
+      var month = now.getMonth() + 1;
+      var date = now.getDate();
+      var days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+      var weekDaysFull = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+      var dayIndex = now.getDay();
+      var dayStr = days[dayIndex];
+      var weekDayFullStr = weekDaysFull[dayIndex];
+
+      // 1. 获取学期开学基准日期 semStart (支持自定义配置开学日)
+      var semStart = null;
+      if (window.store && window.store.data && window.store.data.classInfo && window.store.data.classInfo.termStartDate) {
+        try {
+          var customStart = new Date(window.store.data.classInfo.termStartDate);
+          if (!isNaN(customStart.getTime())) {
+            semStart = customStart;
+          }
+        } catch (e) { }
+      }
+
+      if (!semStart) {
+        // 中国中小学校历常规规则：
+        // 秋季学期：8月25日之后至次年1月31日，以当年9月1日（次年1月对应上一年度9月1日）为基准
+        // 春季学期：2月1日至8月24日，通常以当年2月20日（或农历元宵节前后）为基准
+        if (month >= 9 || month === 1 || (month === 8 && date >= 25)) {
+          var startYear = (month === 1) ? year - 1 : year;
+          semStart = new Date(startYear, 8, 1);
+        } else {
+          semStart = new Date(year, 1, 20);
+        }
+      }
+
+      // 2. 严格按中国自然教学周（周一为一周起始日，周日为结束日）动态推算开学教学周次
+      var getMonday = function (d) {
+        var dt = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        var day = dt.getDay(); // 0 是周日, 1 是周一... 6 是周六
+        var diff = (day === 0 ? -6 : 1 - day);
+        dt.setDate(dt.getDate() + diff);
+        dt.setHours(0, 0, 0, 0);
+        return dt;
+      };
+
+      var semStartMonday = getMonday(semStart);
+      var nowMonday = getMonday(now);
+      var diffMs = nowMonday.getTime() - semStartMonday.getTime();
+      var diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+      var weekNum = Math.max(1, diffWeeks + 1);
+
+      // 3. 实时结合中国通用农历
+      var lunar = (window.getLunarDate && typeof window.getLunarDate === 'function')
+        ? window.getLunarDate(now)
+        : null;
+      var lunarShort = (lunar && lunar.lunarShort) ? lunar.lunarShort : '七月廿六';
+      var lunarFull = (lunar && lunar.lunarFull) ? lunar.lunarFull : '农历七月廿六';
+
+      return {
+        year: year,
+        month: month,
+        date: date,
+        dayStr: dayStr,
+        weekDayFullStr: weekDayFullStr,
+        weekNum: weekNum,
+        lunar: lunar || { lunarShort: lunarShort, lunarFull: lunarFull },
+        lunarShort: lunarShort,
+        lunarFull: lunarFull,
+        displayDate: year + "年" + month + "月" + date + "日",
+        displayFull: year + "年" + month + "月" + date + "日 " + dayStr + " (农历" + lunarShort + ") · 第" + weekNum + "周",
+        displayWeekFull: year + "年" + month + "月" + date + "日 " + weekDayFullStr + " (农历" + lunarShort + ") · 第" + weekNum + "周",
+        displayShort: year + "年" + month + "月" + date + "日 " + dayStr,
+        dateIso: year + "-" + String(month).padStart(2, '0') + "-" + String(date).padStart(2, '0')
+      };
+    };
+  </script>
+</head>
+
+<body>
+  <div id="app">
+    <!-- ================= 左侧纵向导航栏 (视频同款高质感深蓝) ================= -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-logo-icon">🎓</div>
+        <div class="sidebar-brand-title">班主任工作台</div>
+      </div>
+
+      <nav class="sidebar-menu">
+        <div class="nav-item active" data-view="dashboard">
+          <span class="nav-item-icon">🏠</span>
+          <span>班级总览</span>
+        </div>
+
+        <div class="nav-item" data-view="tasks">
+          <span class="nav-item-icon">📋</span>
+          <span>今日班务</span>
+          <span class="nav-item-badge" id="sidebarTasksBadge">0</span>
+        </div>
+
+        <div class="nav-item" data-view="students">
+          <span class="nav-item-icon">👨‍🎓</span>
+          <span>学生档案</span>
+        </div>
+
+        <div class="nav-item" data-view="attendance">
+          <span class="nav-item-icon">⏱️</span>
+          <span>考勤请假</span>
+        </div>
+
+        <div class="nav-item" data-view="schedule">
+          <span class="nav-item-icon">🗓️</span>
+          <span>课表与排班</span>
+        </div>
+
+        <div class="nav-item" data-view="homework">
+          <span class="nav-item-icon">📚</span>
+          <span>作业管理</span>
+        </div>
+
+        <div class="nav-item" data-view="exams">
+          <span class="nav-item-icon">📈</span>
+          <span>成绩与学情</span>
+        </div>
+
+        <div class="nav-item" data-view="growth">
+          <span class="nav-item-icon">🌱</span>
+          <span>成长评价</span>
+        </div>
+
+        <div class="nav-item" data-view="communication">
+          <span class="nav-item-icon">💬</span>
+          <span>家校沟通</span>
+        </div>
+
+        <div class="nav-item" data-view="safety">
+          <span class="nav-item-icon">🛡️</span>
+          <span>安全与健康</span>
+        </div>
+
+        <div class="nav-item" data-view="rules">
+          <span class="nav-item-icon">📜</span>
+          <span>班规定制</span>
+        </div>
+
+        <div class="nav-item" data-view="score">
+          <span class="nav-item-icon">🏆</span>
+          <span>班级量化</span>
+        </div>
+
+        <div class="nav-item" data-view="pets">
+          <span class="nav-item-icon">🐾</span>
+          <span>班级宠物</span>
+          <span class="nav-item-badge cyan">彩蛋</span>
+        </div>
+
+        <div class="nav-item" data-view="activities">
+          <span class="nav-item-icon">🎉</span>
+          <span>班级活动</span>
+        </div>
+
+        <div class="nav-item" data-view="stats">
+          <span class="nav-item-icon">📊</span>
+          <span>统计报表</span>
+        </div>
+
+        <div class="nav-item" data-view="teachers" id="sidebarTeachersNavItem"
+          onclick="window.openSubjectTeachersModal()">
+          <span class="nav-item-icon">👩‍🏫</span>
+          <span>任课老师团队</span>
+        </div>
+      </nav>
+
+      <!-- 底部单独设置“班级设置”和“数据管理” -->
+      <div class="sidebar-footer">
+        <div class="nav-item" data-view="settings" id="sidebarSettingsNavItem">
+          <span class="nav-item-icon">⚙️</span>
+          <span>班级设置</span>
+        </div>
+        <div class="nav-item" data-view="datamgmt" id="sidebarDatamgmtNavItem">
+          <span class="nav-item-icon">💾</span>
+          <span>数据管理</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ================= 右侧主工作台 ================= -->
+    <main class="main-layout">
+      <!-- 顶部 Header -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="class-tag-pill" id="topbarClassPill" title="当前执教工作班级" style="cursor: default; user-select: none;">
+            🏫 <span id="topbarClassNameText">小学四年级 · 小学四年级（七）班 · 45人</span>
+          </div>
+          <div class="today-date-tag" id="topbarDateTag"
+            style="font-size: 13px; font-weight: 600; color: #475569; background: #f1f5f9; padding: 4px 12px; border-radius: 20px; display: flex; align-items: center; gap: 6px;"
+            title="当前系统实际日期与周次">
+            📅 <span id="topbarDateText">2026年9月5日 周六 · 第1周</span>
+            <script>
+              try {
+                if (window.getCurrentDateInfo) {
+                  document.getElementById('topbarDateText').innerText = window.getCurrentDateInfo().displayFull;
+                }
+              } catch (e) { }
+            </script>
+          </div>
+          <div class="search-box">
+            <input type="text" id="globalSearchInput" placeholder="全局搜索学生、班务、通知... (回车确认)">
+            <span class="search-icon">🔍</span>
+          </div>
+        </div>
+
+        <div class="topbar-right">
+          <button class="btn btn-sm btn-secondary" id="topbarTeachersBtn"
+            style="font-size: 12px; padding: 4px 10px; font-weight: 600;" onclick="window.openSubjectTeachersModal()"
+            title="班主任维护各科任课老师账号与密码">
+            👩‍🏫 任课老师
+          </button>
+          <button class="icon-btn" id="fullscreenToggleBtn" title="全屏显示">⛶</button>
+          <button class="icon-btn" title="系统消息" onclick="window.switchView('communication')">
+            🔔
+            <span class="notification-dot"></span>
+          </button>
+
+          <div class="user-profile" onclick="window.openUserLoginModal(false)" title="点击切换账号或查看当前教师身份"
+            style="cursor: pointer;">
+            <div class="user-avatar" id="topbarUserAvatar">👩‍🏫</div>
+            <div class="user-info-text">
+              <span class="user-name" id="topbarUserName">李老师</span>
+              <span class="user-role" id="topbarUserRole">班主任</span>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-secondary"
+            style="font-size: 12px; padding: 4px 8px; color: #64748b; margin-left: 2px;"
+            onclick="window.handleUserLogout()" title="退出当前账号并重新登录">
+            🚪 退出
+          </button>
+        </div>
+      </header>
+
+      <!-- 视图渲染容器 -->
+      <div class="view-container" id="mainContentArea">
+        <!-- 各视图通过 JS 动态渲染 -->
+      </div>
+    </main>
+  </div>
+
+  <!-- ================= 隐藏的 Excel 文件上传控件 ================= -->
+  <input type="file" id="excelStudentInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleStudentExcelImport(event)">
+  <input type="file" id="excelTimetableInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleTimetableExcelImport(event)">
+  <input type="file" id="excelSeatingInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleSeatingExcelImport(event)">
+  <input type="file" id="excelDutyInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleDutyExcelImport(event)">
+  <input type="file" id="excelCadresInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleCadresExcelImport(event)">
+  <input type="file" id="excelScoreInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleScoreExcelImport(event)">
+  <input type="file" id="excelQuantScoreInput" accept=".xlsx, .xls" style="display:none;"
+    onchange="window.handleQuantScoreExcelImport(event)">
+  <input type="file" id="albumLocalImageInput" accept="image/*" multiple style="display:none;"
+    onchange="window.handleAlbumLocalImageUpload(event)">
+  <input type="file" id="customReportTemplateFileInput" accept=".xlsx, .xls, .docx, .doc, .pdf" style="display:none;"
+    onchange="window.handleCustomReportUpload(event)">
+  <input type="file" id="studentAvatarFileInput" accept="image/*" style="display:none;"
+    onchange="window.handleStudentAvatarFileSelected(event)">
+
+  <!-- ================= 学生档案右侧滑出抽屉 (Drawer) ================= -->
+  <div class="drawer-overlay" id="drawerOverlay" onclick="if(event.target===this) window.closeStudentDrawer()">
+    <div class="drawer" id="studentDrawer">
+      <div class="drawer-header">
+        <div class="drawer-title-area">
+          <div class="drawer-avatar student-photo-avatar" id="drawerStudentAvatar"
+            onclick="window.triggerStudentAvatarUpload('drawer')" title="点击上传或更换该学生真实照片头像 (可拖拽调整居中)"
+            style="cursor: pointer; position: relative;">👦</div>
+          <div>
+            <div style="font-size: 17px; font-weight: 800; color: #1e293b;" id="drawerStudentName">学生姓名</div>
+            <div style="font-size: 12px; color: var(--text-muted);" id="drawerStudentId">学号信息</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-sm btn-primary" style="padding: 4px 10px; font-size: 12px; font-weight: 700;"
+            onclick="window.openEditStudentModal(window.currentDrawerStudentId)" title="单独修改该学生信息">
+            ✏️ 修改档案
+          </button>
+          <button class="drawer-close-btn" onclick="window.closeStudentDrawer()">✕</button>
+        </div>
+      </div>
+
+      <div class="drawer-body">
+        <div class="drawer-tabs">
+          <div class="drawer-tab active" data-tab="basic" onclick="window.switchDrawerTab('basic')">基本信息</div>
+          <div class="drawer-tab" data-tab="school" onclick="window.switchDrawerTab('school')">在校情况</div>
+          <div class="drawer-tab" data-tab="health" onclick="window.switchDrawerTab('health')">健康信息</div>
+          <div class="drawer-tab" data-tab="growth" onclick="window.switchDrawerTab('growth')">成长轨迹</div>
+        </div>
+
+        <div id="drawerTabContent">
+          <!-- 动态加载 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= 模态弹窗系统 (Modals) ================= -->
+
+  <!-- 1. 添加班务弹窗 -->
+  <div class="modal-overlay" id="addTaskModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📝 添加班务任务</div>
+        <button class="drawer-close-btn" onclick="window.closeAddTaskModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>班务任务名称 *</label>
+          <input type="text" class="form-control" id="newTaskTitle" placeholder="如：回收家长会回执">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>任务分类</label>
+            <select class="form-control" id="newTaskCategory">
+              <option value="学校通知">学校通知</option>
+              <option value="班级任务">班级任务</option>
+              <option value="材料收集">材料收集</option>
+              <option value="表格填写">表格填写</option>
+              <option value="费用收取">费用收取</option>
+              <option value="家长回复">家长回复</option>
+              <option value="学生谈话">学生谈话</option>
+              <option value="活动准备">活动准备</option>
+              <option value="安全提醒">安全提醒</option>
+              <option value="临时事项">临时事项</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>优先级</label>
+            <select class="form-control" id="newTaskPriority">
+              <option value="high">🔴 高优先级</option>
+              <option value="medium" selected>🟡 中优先级</option>
+              <option value="low">🟢 普通</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>截止时间</label>
+            <input type="date" class="form-control" id="newTaskDeadline">
+          </div>
+          <div class="form-group">
+            <label>负责人</label>
+            <input type="text" class="form-control" id="newTaskAssignee" value="班主任">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>具体说明或要求</label>
+          <textarea class="form-control" id="newTaskDesc" placeholder="任务详细要求..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddTaskModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddTask()">确认添加</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 布置新作业弹窗 -->
+  <div class="modal-overlay" id="assignHomeworkModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📚 布置学科新作业</div>
+        <button class="drawer-close-btn" onclick="window.closeAssignHomeworkModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>所属学科 *</label>
+            <select class="form-control" id="newHwSubject">
+              <option value="语文">语文</option>
+              <option value="数学">数学</option>
+              <option value="英语">英语</option>
+              <option value="科学">科学</option>
+              <option value="美术">美术</option>
+              <option value="其他">其他学科</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>截止提交时间 *</label>
+            <input type="datetime-local" class="form-control" id="newHwDeadline">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>作业标题 *</label>
+          <input type="text" class="form-control" id="newHwTitle" placeholder="如：第6课生字词抄写与背诵">
+        </div>
+        <div class="form-group">
+          <label>作业内容与完成要求 *</label>
+          <textarea class="form-control" id="newHwContent" style="min-height: 90px;"
+            placeholder="列出具体题目、页码及完成规范..."></textarea>
+        </div>
+        <div class="form-group">
+          <label style="display: flex; align-items: center; justify-content: space-between;">
+            <span>💡 智慧黑板自律语录（选填/快捷选择）</span>
+            <span id="newHwQuoteCount" style="font-size: 11.5px; color: #64748b; font-weight: normal;">0/26字 (默认推荐)</span>
+          </label>
+          <div style="margin-bottom: 6px;">
+            <select class="form-control" id="newHwQuotePreset" style="font-size: 12.5px; color: #334155; background-color: #f8fafc;"
+                    onchange="window.selectHwQuotePreset('newHwQuotePreset', 'newHwQuote', 'newHwQuoteCount')">
+              <option value="">✨ 点击快捷选用系统自带推荐语录...</option>
+              <option value="博学笃志，自律自强，做时间的主人！">🌟 博学笃志，自律自强，做时间的主人！(默认)</option>
+              <option value="宝剑锋从磨砺出，梅花香自苦寒来。自律自立，勇攀高峰！">⚔️ 宝剑锋从磨砺出，梅花香自苦寒来。自律自立，勇攀高峰！</option>
+              <option value="千里之行始于足下，今日事今日毕，绝不拖延！">🏃 千里之行始于足下，今日事今日毕，绝不拖延！</option>
+              <option value="书山有路勤为径，学海无涯苦作舟。日积月累！">📖 书山有路勤为径，学海无涯苦作舟。日积月累！</option>
+              <option value="细节决定成败，习惯成就未来。严于律己，超越自我！">🎯 细节决定成败，习惯成就未来。严于律己，超越自我！</option>
+              <option value="非学无以广才，非志无以成学。静心自律，沉着专注！">🧘 非学无以广才，非志无以成学。静心自律，沉着专注！</option>
+              <option value="自律是梦想的翅膀，今日拼搏，明日辉煌！">🚀 自律是梦想的翅膀，今日拼搏，明日辉煌！</option>
+              <option value="少壮工夫老始成，自律自觉，笃行不怠！">🌱 少壮工夫老始成，自律自觉，笃行不怠！</option>
+            </select>
+          </div>
+          <input type="text" class="form-control" id="newHwQuote" maxlength="26"
+                 placeholder="也可自行填写设置（含标点限26字，不填使用默认语录）"
+                 oninput="window.updateHwQuoteCount('newHwQuote', 'newHwQuoteCount', 'newHwQuotePreset')">
+          <div style="font-size: 11.5px; color: #64748b; margin-top: 4px;">
+            <span>💡 支持下拉选用经典语录，亦可由教师自由打字填写设置</span>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="newHwSign" style="width:16px; height:16px;"> 需要家长签字
+            </label>
+          </div>
+          <div class="form-group">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="newHwSubWork" checked style="width:16px; height:16px;"> 需要提交作品/本子
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAssignHomeworkModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAssignHomework()">确认发布作业</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 修改作业弹窗 -->
+  <div class="modal-overlay" id="editHomeworkModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 修改作业内容</div>
+        <button class="drawer-close-btn" onclick="window.closeEditHomeworkModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editHwId">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>所属学科</label>
+            <input type="text" class="form-control" id="editHwSubject">
+          </div>
+          <div class="form-group">
+            <label>截止提交时间</label>
+            <input type="text" class="form-control" id="editHwDeadline">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>作业标题</label>
+          <input type="text" class="form-control" id="editHwTitle">
+        </div>
+        <div class="form-group">
+          <label>作业内容与要求</label>
+          <textarea class="form-control" id="editHwContent" style="min-height: 90px;"></textarea>
+        </div>
+        <div class="form-group">
+          <label style="display: flex; align-items: center; justify-content: space-between;">
+            <span>💡 智慧黑板自律语录（选填/快捷选择）</span>
+            <span id="editHwQuoteCount" style="font-size: 11.5px; color: #64748b; font-weight: normal;">0/26字 (默认推荐)</span>
+          </label>
+          <div style="margin-bottom: 6px;">
+            <select class="form-control" id="editHwQuotePreset" style="font-size: 12.5px; color: #334155; background-color: #f8fafc;"
+                    onchange="window.selectHwQuotePreset('editHwQuotePreset', 'editHwQuote', 'editHwQuoteCount')">
+              <option value="">✨ 点击快捷选用系统自带推荐语录...</option>
+              <option value="博学笃志，自律自强，做时间的主人！">🌟 博学笃志，自律自强，做时间的主人！(默认)</option>
+              <option value="宝剑锋从磨砺出，梅花香自苦寒来。自律自立，勇攀高峰！">⚔️ 宝剑锋从磨砺出，梅花香自苦寒来。自律自立，勇攀高峰！</option>
+              <option value="千里之行始于足下，今日事今日毕，绝不拖延！">🏃 千里之行始于足下，今日事今日毕，绝不拖延！</option>
+              <option value="书山有路勤为径，学海无涯苦作舟。日积月累！">📖 书山有路勤为径，学海无涯苦作舟。日积月累！</option>
+              <option value="细节决定成败，习惯成就未来。严于律己，超越自我！">🎯 细节决定成败，习惯成就未来。严于律己，超越自我！</option>
+              <option value="非学无以广才，非志无以成学。静心自律，沉着专注！">🧘 非学无以广才，非志无以成学。静心自律，沉着专注！</option>
+              <option value="自律是梦想的翅膀，今日拼搏，明日辉煌！">🚀 自律是梦想的翅膀，今日拼搏，明日辉煌！</option>
+              <option value="少壮工夫老始成，自律自觉，笃行不怠！">🌱 少壮工夫老始成，自律自觉，笃行不怠！</option>
+            </select>
+          </div>
+          <input type="text" class="form-control" id="editHwQuote" maxlength="26"
+                 placeholder="也可自行填写设置（含标点限26字，不填使用默认语录）"
+                 oninput="window.updateHwQuoteCount('editHwQuote', 'editHwQuoteCount', 'editHwQuotePreset')">
+          <div style="font-size: 11.5px; color: #64748b; margin-top: 4px;">
+            <span>💡 支持下拉选用经典语录，亦可由教师自由打字填写设置</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditHomeworkModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditHomework()">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 新增考试弹窗 -->
+  <div class="modal-overlay" id="newExamModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📈 新增考试学情评估</div>
+        <button class="drawer-close-btn" onclick="window.closeNewExamModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>考试名称 *</label>
+          <input type="text" class="form-control" id="newExamName" placeholder="如：第四单元综合测验">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>考试类型</label>
+            <select class="form-control" id="newExamType">
+              <option value="单元测试">单元测试</option>
+              <option value="月度评估">月度评估</option>
+              <option value="期中考试">期中考试</option>
+              <option value="期末考试">期末考试</option>
+              <option value="学业调研">学业调研</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>考试日期</label>
+            <input type="date" class="form-control" id="newExamDate">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>考试总括名称</label>
+            <input type="text" class="form-control" id="newExamSubject" value="全科综合测评">
+          </div>
+          <div class="form-group">
+            <label>单科基准满分</label>
+            <input type="number" class="form-control" id="newExamFullScore" value="100">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>细分科目配置 (支持自定义，各科目以逗号或空格隔开) *</label>
+          <input type="text" class="form-control" id="newExamSubjectsList" value="语文, 数学, 英语, 科学"
+            placeholder="如：语文, 数学, 英语, 科学, 道德与法治">
+          <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">
+            💡 系统将自动为每个学生创建以上细分科目的成绩栏，并实时自动计算全科总分与排位。
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeNewExamModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitNewExam()">确认创建考试</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. 修改学生分数弹窗 -->
+  <div class="modal-overlay" id="editScoreModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 录入/修改学生各科成绩</div>
+        <button class="drawer-close-btn" onclick="window.closeEditScoreModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editScoreExamId">
+        <input type="hidden" id="editScoreStudentId">
+        <div class="form-group">
+          <label>学生姓名</label>
+          <input type="text" class="form-control" id="editScoreStudentName" readonly
+            style="background:#f1f5f9; font-weight: 700;">
+        </div>
+        <div id="editScoreSubjectsContainer"
+          style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;">
+          <!-- 动态加载各科目细分打分输入框 -->
+        </div>
+        <div class="form-group">
+          <label>全科累计总分 (自动汇总)</label>
+          <input type="number" class="form-control" id="editScoreTotalDisplay" readonly
+            style="background: #f8fafc; font-weight: 800; color: #2563eb; font-size: 16px;">
+        </div>
+        <div class="form-group">
+          <label>教师针对性评语与学情诊断</label>
+          <textarea class="form-control" id="editScoreComment" placeholder="如：基础运算稳定，阅读理解需要进一步提炼中心思想..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditScoreModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditScore()">保存成绩</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. 编辑课程安排弹窗 -->
+  <div class="modal-overlay" id="editCourseModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📅 编辑课程安排</div>
+        <button class="drawer-close-btn" onclick="window.closeEditCourseModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editCourseDay">
+        <input type="hidden" id="editCoursePeriodIdx">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>星期几</label>
+            <input type="text" class="form-control" id="editCourseDayDisplay" readonly style="background:#f1f5f9;">
+          </div>
+          <div class="form-group">
+            <label>节次</label>
+            <input type="text" class="form-control" id="editCoursePeriodDisplay" readonly style="background:#f1f5f9;">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>课程学科 *</label>
+            <input type="text" class="form-control" id="editCourseSubject" placeholder="如：语文">
+          </div>
+          <div class="form-group">
+            <label>任课老师 *</label>
+            <input type="text" class="form-control" id="editCourseTeacher" placeholder="如：李老师">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>上课教室/地点</label>
+            <input type="text" class="form-control" id="editCourseRoom" value="本班教室">
+          </div>
+          <div class="form-group">
+            <label>卡片底色</label>
+            <select class="form-control" id="editCourseColor">
+              <option value="#fee2e2">淡红 (语文类)</option>
+              <option value="#e0e7ff">淡蓝 (数学类)</option>
+              <option value="#fef3c7">淡黄 (外语/音乐类)</option>
+              <option value="#d1fae5">淡绿 (体育类)</option>
+              <option value="#fce7f3">淡粉 (美育类)</option>
+              <option value="#ccfbf1">青绿 (科学类)</option>
+              <option value="#ede9fe">淡紫 (信息技术类)</option>
+              <option value="#f1f5f9">灰色 (自习/班会)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditCourseModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditCourse()">保存课程</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. 编辑值日安排弹窗 -->
+  <div class="modal-overlay" id="editDutyModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">🧹 编辑值日生与保洁区域</div>
+        <button class="drawer-close-btn" onclick="window.closeEditDutyModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editDutyDay">
+        <div class="form-group">
+          <label>值日轮值日</label>
+          <input type="text" class="form-control" id="editDutyDayDisplay" readonly style="background:#f1f5f9;">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>值日组长 *</label>
+            <input type="text" class="form-control" id="editDutyLeader" placeholder="如：陈思远">
+          </div>
+          <div class="form-group">
+            <label>清洁责任区域 *</label>
+            <input type="text" class="form-control" id="editDutyZone" placeholder="如：讲台、黑板及垃圾角">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>值日组员名单 (以顿号或逗号分隔) *</label>
+          <input type="text" class="form-control" id="editDutyMembers" placeholder="如：李小红、王小刚、赵小美、费伟涵">
+        </div>
+        <div class="form-group">
+          <label>具体保洁要求</label>
+          <input type="text" class="form-control" id="editDutyTask" placeholder="如：黑板擦拭干净，地面拖洗并倒垃圾">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditDutyModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditDuty()">保存值日</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. 新增/编辑班干部弹窗 -->
+  <div class="modal-overlay" id="editCadreModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">🎖️ 班干部设置与分工评价</div>
+        <button class="drawer-close-btn" onclick="window.closeEditCadreModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editCadreOldTitle">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>干部职务 *</label>
+            <input type="text" class="form-control" id="editCadreTitle" placeholder="如：班长 / 学习委员">
+          </div>
+          <div class="form-group">
+            <label>担任学生姓名 *</label>
+            <input type="text" class="form-control" id="editCadreName" placeholder="如：陈思远">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>主要岗位职责与工作分工 *</label>
+          <textarea class="form-control" id="editCadreDuties" placeholder="详细说明负责的工作事项..."></textarea>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>任职时间</label>
+            <input type="text" class="form-control" id="editCadreTerm" value="2026.09 - 至今">
+          </div>
+          <div class="form-group">
+            <label>工作履职评价</label>
+            <select class="form-control" id="editCadreRating">
+              <option value="优秀">🌟 优秀</option>
+              <option value="良好" selected>👍 良好</option>
+              <option value="称职">合格</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditCadreModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditCadre()">确认保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. 添加学生档案弹窗 -->
+  <div class="modal-overlay" id="addStudentModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">👨‍🎓 添加新学生电子档案</div>
+        <button class="drawer-close-btn" onclick="window.closeAddStudentModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- 学生档案真实照片头像上传与调整栏 -->
+        <div
+          style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div id="newStuAvatarPreview" class="student-photo-avatar"
+              style="width: 76px; height: 76px; background: #e0f2fe; color: #0369a1; font-size: 38px; border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.12);">
+              👦
+            </div>
+            <div>
+              <div style="font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 2px;">学生真实档案照片</div>
+              <div style="font-size: 12px; color: var(--text-muted);">支持上传免冠证件照/生活照，上传后可拖拽将面部置于正中圆心</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <input type="hidden" id="newStuAvatarUrl" value="">
+            <button type="button" class="btn btn-sm btn-primary" onclick="window.triggerStudentAvatarUpload('new')">📷
+              上传真实照片</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="newStuCropAdjustBtn"
+              onclick="window.openCurrentAvatarForCropping('new')" style="display: none;">✂️ 拖拽居中调整</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="newStuRemoveAvatarBtn"
+              onclick="window.removeStudentAvatar('new')" style="display: none;">🗑️ 恢复默认</button>
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>学生姓名 *</label>
+            <input type="text" class="form-control" id="newStuName" placeholder="如：张一鸣">
+          </div>
+          <div class="form-group">
+            <label>性别</label>
+            <select class="form-control" id="newStuGender">
+              <option value="男">男 👦</option>
+              <option value="女">女 👧</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>民族</label>
+            <input type="text" class="form-control" id="newStuNation" value="汉族" placeholder="如：汉族">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>学号 (留空自动生成)</label>
+            <input type="text" class="form-control" id="newStuId" placeholder="如：2026040701">
+          </div>
+          <div class="form-group">
+            <label>出生日期</label>
+            <input type="date" class="form-control" id="newStuBirthday" value="2016-05-15">
+          </div>
+          <div class="form-group">
+            <label>身份证号码 (18位)</label>
+            <input type="text" class="form-control" id="newStuIdCard" placeholder="如：110101201601011234" maxlength="18">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>所在小组</label>
+            <select class="form-control" id="newStuGroup">
+              <option value="1">第1组</option>
+              <option value="2">第2组</option>
+              <option value="3">第3组</option>
+              <option value="4">第4组</option>
+              <option value="5">第5组</option>
+              <option value="6">第6组</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>班级职务</label>
+            <input type="text" class="form-control" id="newStuRole" value="学生">
+          </div>
+          <div class="form-group">
+            <label>上下学接送方式</label>
+            <select class="form-control" id="newStuPickup">
+              <option value="家长接送">家长接送</option>
+              <option value="校车接送">校车接送</option>
+              <option value="自行回家">自行回家</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>监护人姓名</label>
+            <input type="text" class="form-control" id="newStuGuardian" placeholder="如：张先生">
+          </div>
+          <div class="form-group">
+            <label>联系电话</label>
+            <input type="text" class="form-control" id="newStuPhone" placeholder="如：13800000000">
+          </div>
+          <div class="form-group">
+            <label>过敏史与健康提醒</label>
+            <input type="text" class="form-control" id="newStuAllergies" value="无" placeholder="如：芒果过敏，无特殊病史">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label style="color: #059669; font-weight: 700;">🏡 户口所在地 / 户籍地址</label>
+            <input type="text" class="form-control" id="newStuHukou" placeholder="如：大坪乡来苏村委会十三组">
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label>📍 现居住常住地址</label>
+            <input type="text" class="form-control" id="newStuAddress" placeholder="如：隽水镇白沙社区居委会四庄路银山金城二期">
+          </div>
+        </div>
+
+        <div class="form-group"
+          style="background: #f8fafc; padding: 12px; border-radius: var(--radius-md); border: 1px solid #e2e8f0; margin-top: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-weight: 700; color: #1e293b; margin: 0;">🏷️ 学生成长个性标签 (支持同时多选)</label>
+            <span style="font-size: 11.5px; color: var(--text-muted);">💡 单击徽章即可勾选或取消</span>
+          </div>
+          <div id="newStuTagsChipsContainer" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+            <!-- JS 动态渲染多选徽章 -->
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" class="form-control" id="newStuCustomTagInput" placeholder="输入自拟新标签..."
+              style="max-width: 180px; height: 32px; font-size: 12.5px;">
+            <button class="btn btn-sm btn-secondary" onclick="window.quickAddAndSelectCustomTag('new')">➕ 贴新标签</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddStudentModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddStudent()">确认录入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 10. 发布班级通知弹窗 -->
+  <div class="modal-overlay" id="publishNoticeModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📢 发布班级重要通知</div>
+        <button class="drawer-close-btn" onclick="window.closePublishNoticeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>通知标题 *</label>
+          <input type="text" class="form-control" id="noticeTitleInput" placeholder="如：关于组织春季研学活动的通知">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>回执截止时间</label>
+            <input type="date" class="form-control" id="noticeDeadlineInput">
+          </div>
+          <div class="form-group">
+            <label style="margin-top: 28px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="noticeReceiptCheck" checked style="width:16px; height:16px;"> 强制要求家长确认回执
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>通知详细正文内容 *</label>
+          <textarea class="form-control" id="noticeContentInput" style="min-height: 120px;"
+            placeholder="撰写详细通知文本，支持格式排版..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closePublishNoticeModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitPublishNotice()">立即发布</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11. 登记家长沟通弹窗 -->
+  <div class="modal-overlay" id="addCommLogModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">📞 记录家校沟通台账</div>
+        <button class="drawer-close-btn" onclick="window.closeAddCommLogModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>学生姓名 *</label>
+            <input type="text" class="form-control" id="commStudentName" placeholder="如：张明">
+          </div>
+          <div class="form-group">
+            <label>联系对象</label>
+            <input type="text" class="form-control" id="commGuardian" value="家长">
+          </div>
+          <div class="form-group">
+            <label>沟通方式</label>
+            <select class="form-control" id="commMethod">
+              <option value="电话沟通">电话沟通</option>
+              <option value="微信沟通">微信沟通</option>
+              <option value="面谈交流">面谈交流</option>
+              <option value="上门家访">上门家访</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>沟通主题 *</label>
+          <input type="text" class="form-control" id="commTopic" placeholder="如：数学听课注意力与作业习惯跟进">
+        </div>
+        <div class="form-group">
+          <label>家长反馈情况</label>
+          <textarea class="form-control" id="commFeedback" placeholder="家长的态度、意见与家庭作息情况..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>后续跟进措施</label>
+          <input type="text" class="form-control" id="commActionPlan" placeholder="如：下周继续跟踪第一节课听课状态">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddCommLogModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddCommLog()">保存记录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 11-A. 编辑家长沟通台账弹窗 -->
+  <div class="modal-overlay" id="editCommLogModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 编辑家校沟通台账记录</div>
+        <button class="drawer-close-btn" onclick="window.closeEditCommLogModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editCommLogId">
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>学生姓名 *</label>
+            <input type="text" class="form-control" id="editCommStudentName" placeholder="如：张明">
+          </div>
+          <div class="form-group">
+            <label>联系对象</label>
+            <input type="text" class="form-control" id="editCommGuardian" value="家长">
+          </div>
+          <div class="form-group">
+            <label>沟通方式</label>
+            <select class="form-control" id="editCommMethod">
+              <option value="电话沟通">电话沟通</option>
+              <option value="微信沟通">微信沟通</option>
+              <option value="面谈交流">面谈交流</option>
+              <option value="上门家访">上门家访</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>沟通主题 *</label>
+            <input type="text" class="form-control" id="editCommTopic" placeholder="如：数学听课注意力与作业习惯跟进">
+          </div>
+          <div class="form-group">
+            <label>沟通状态</label>
+            <select class="form-control" id="editCommStatus">
+              <option value="已处理">已处理</option>
+              <option value="跟进中">跟进中</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>家长反馈情况</label>
+          <textarea class="form-control" id="editCommFeedback" placeholder="家长的态度、意见与家庭作息情况..."></textarea>
+        </div>
+        <div class="form-group">
+          <label>后续跟进措施</label>
+          <input type="text" class="form-control" id="editCommActionPlan" placeholder="如：下周继续跟踪第一节课听课状态">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditCommLogModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditCommLog()">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 12. 常用通知模板弹窗 -->
+  <div class="modal-overlay" id="noticeTemplateModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">📑 常用通知模板库</div>
+        <button class="drawer-close-btn" onclick="window.closeNoticeTemplateModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display:flex; flex-direction:column; gap:12px;" id="noticeTemplatesList">
+          <!-- 动态加载模板 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeNoticeTemplateModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13. 记录表现弹窗 (支持评价指标联动与自定义小红花朵数) -->
+  <div class="modal-overlay" id="addGrowthEventModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">🌱 记录学生综合表现与闪光点</div>
+        <button class="drawer-close-btn" onclick="window.closeAddGrowthEventModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>学生姓名 *</label>
+            <select class="form-control" id="growthStuName">
+              <option value="">-- 请选择学生 --</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>评价维度 *</span>
+              <a href="javascript:void(0)" onclick="window.openGrowthDimManageModal()"
+                style="font-size: 11px; color: #2563eb; text-decoration: none; font-weight: normal;">⚙️ 管理指标</a>
+            </label>
+            <select class="form-control" id="growthDim">
+              <!-- JS 动态注入全部评价指标 -->
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>评价性质</label>
+            <select class="form-control" id="growthTag" onchange="window.handleGrowthTagChange(this.value)">
+              <option value="表扬">🌸 正向表扬激励</option>
+              <option value="待改进">💡 待改进辅导建议</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>奖励小红花</span>
+              <a href="javascript:void(0)" onclick="window.setFlowerValuePrompt()"
+                style="font-size: 11px; color: #7c3aed; text-decoration: none; font-weight: normal;"
+                title="点击自定义设置每朵小红花折算分值">⚙️ 设置分值(<span id="flowerUnitValLabel">3</span>分/朵)</a>
+            </label>
+            <div style="display: flex; gap: 8px;">
+              <select class="form-control" id="growthFlowers"
+                onchange="window.handleGrowthFlowerSelectChange(this.value)">
+                <option value="+1朵小红花">+1朵 🌸</option>
+                <option value="+2朵小红花" selected>+2朵 🌸🌸</option>
+                <option value="+3朵小红花">+3朵 🌸🌸🌸</option>
+                <option value="+5朵小红花">+5朵 🌸x5</option>
+                <option value="+10朵小红花">+10朵 🌸x10</option>
+                <option value="需加油">暂无（需加油）</option>
+                <option value="custom">✏️ 自定义朵数...</option>
+              </select>
+              <input type="number" class="form-control" id="growthFlowersCustomCount" placeholder="自定义朵数" min="1"
+                max="999" value="6" style="display: none; width: 120px;"
+                oninput="window.handleCustomFlowerInput(this.value)">
+            </div>
+            <div id="flowerPetBonusHint" style="font-size: 11.5px; color: #16a34a; margin-top: 5px; font-weight: 600;">
+              🐾 将同步联动为班级宠物奖励 <span id="flowerPetBonusNum">+6</span> 经验积分！
+            </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>具体表现描述与教师寄语 *</label>
+          <textarea class="form-control" id="growthContent" placeholder="具体描述孩子的突出闪光点..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddGrowthEventModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddGrowthEvent()">保存记录并联动宠物</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13-A. 综合素质评价指标管理弹窗 -->
+  <div class="modal-overlay" id="growthDimManageModal">
+    <div class="modal-dialog" style="max-width: 620px;">
+      <div class="modal-header">
+        <div class="modal-title">🏷️ 综合素质评价指标管理</div>
+        <button class="drawer-close-btn" onclick="window.closeGrowthDimManageModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div
+          style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #1e40af; line-height: 1.5;">
+          💡 <strong>指标自拟管理：</strong>您可以自定义修改、增减综合素质评价指标（如学习习惯、课堂表现、体育锻炼等），添加或修改后的指标将实时同步在【+ 记录表现】弹窗下拉选框中。
+        </div>
+
+        <div class="card"
+          style="padding: 12px 14px; margin-bottom: 14px; background: #f8fafc; border: 1.5px dashed #cbd5e1;">
+          <div style="font-weight: 700; font-size: 13px; color: #334155; margin-bottom: 8px;">➕ 添加新评价指标</div>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="newDimIconInput" class="form-control"
+              style="width: 70px; text-align: center; font-size: 18px;" placeholder="图标" value="⭐" title="输入指标图标 Emoji">
+            <input type="text" id="newDimNameInput" class="form-control" style="flex: 1;"
+              placeholder="输入新指标名称，如：科学探究 / 艺术表现 / 书写习惯"
+              onkeydown="if(event.key==='Enter') window.saveNewGrowthDimension()">
+            <button class="btn btn-sm btn-primary" onclick="window.saveNewGrowthDimension()">确认添加</button>
+          </div>
+        </div>
+
+        <div style="font-weight: 700; font-size: 13px; color: #334155; margin-bottom: 8px;">📋 当前全部评价指标：</div>
+        <div id="growthDimManageList" style="display: flex; flex-direction: column; gap: 8px;">
+          <!-- 动态渲染各指标条目，支持实时改名、改图标、删除 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="window.closeGrowthDimManageModal()">完成并关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 13-B. 综合素质指标详情与获奖台账明细弹窗 -->
+  <div class="modal-overlay" id="growthDimDetailModal">
+    <div class="modal-dialog" style="max-width: 820px;">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between;">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <span>🏷️ 指标详情与表彰台账</span>
+          <span class="badge" style="background: #e0f2fe; color: #0284c7; font-size: 13px; font-weight: 700;"
+            id="detailDimBadgeTitle"></span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeGrowthDimDetailModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <input type="hidden" id="currentDetailDimId" value="">
+
+        <!-- 顶部指标属性编辑区与人数统计徽章 -->
+        <div class="card"
+          style="padding: 14px 16px; margin-bottom: 16px; background: #f8fafc; border: 1px solid #e2e8f0;">
+          <div
+            style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;">
+            <div style="font-weight: 700; font-size: 13.5px; color: #1e293b;">⚙️ 编辑指标基础属性</div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <span class="badge" style="background: #e0f2fe; color: #0284c7; font-size: 12px; font-weight: 700;">
+                🏅 <span id="detailDimDistinctCount">0</span> 位学生获得此类表彰
+              </span>
+              <span class="badge" style="background: #fce7f3; color: #db2777; font-size: 12px; font-weight: 700;">
+                🌸 累计奖励小红花 <span id="detailDimTotalFlowers">0</span> 朵
+              </span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="detailDimIconInput" class="form-control"
+              style="width: 64px; text-align: center; font-size: 18px;" placeholder="图标" title="修改Emoji图标">
+            <input type="text" id="detailDimNameInput" class="form-control" style="flex: 1; font-weight: 600;"
+              placeholder="指标名称，如：课堂表现">
+            <button class="btn btn-primary" onclick="window.saveGrowthDimDetailInfo()"
+              style="white-space: nowrap; font-weight: 700;">💾 保存指标修改</button>
+          </div>
+        </div>
+
+        <!-- 快捷为该指标登记表彰卡片 -->
+        <div class="card"
+          style="padding: 14px 16px; margin-bottom: 16px; background: #f0fdf4; border: 1.5px dashed #86efac;">
+          <div
+            style="font-weight: 700; font-size: 13.5px; color: #166534; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+            <span>➕ 快捷为该指标登记表彰学生</span>
+            <span style="font-size: 11.5px; color: #15803d; font-weight: normal;">录入后将自动增加该指标获奖人数并联动宠物成长积分</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1.2fr 1.1fr 1.6fr auto; gap: 8px; align-items: center;">
+            <div>
+              <select class="form-control" id="dimInlineStuSelect" style="font-size: 12.5px;">
+                <!-- 动态载入班级学生 -->
+              </select>
+            </div>
+            <div>
+              <select class="form-control" id="dimInlineFlowerSelect" style="font-size: 12.5px;">
+                <option value="1">+1朵小红花 (🌸)</option>
+                <option value="2" selected>+2朵小红花 (🌸🌸)</option>
+                <option value="3">+3朵小红花 (🌸🌸🌸)</option>
+                <option value="5">+5朵小红花 (🌸x5)</option>
+              </select>
+            </div>
+            <div>
+              <input type="text" id="dimInlineContentInput" class="form-control" placeholder="输入突出闪光点与表彰评语..."
+                style="font-size: 12.5px;">
+            </div>
+            <div>
+              <button class="btn btn-success" onclick="window.submitDimInlineCommendation()"
+                style="font-size: 12.5px; white-space: nowrap; font-weight: 700;">
+                ➕ 确认添加
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 获得此标签的学生明细台账列表 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+          <div style="font-weight: 700; font-size: 14px; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+            <span>📋 获得此标签的学生明细与所获小红花</span>
+            <span class="badge" style="background: #f1f5f9; color: #475569; font-size: 11.5px;"
+              id="detailDimRecordCount">0条记录</span>
+          </div>
+        </div>
+
+        <div id="dimStudentAwardList" style="display: flex; flex-direction: column; gap: 8px;">
+          <!-- 动态填充明细列表 -->
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between;">
+        <button class="btn btn-sm" style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5;"
+          onclick="window.deleteCurrentDimFromDetail()">
+          🗑️ 删除该评价指标
+        </button>
+        <button class="btn btn-primary" onclick="window.closeGrowthDimDetailModal()">完成并返回</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 14. 登记学生请假弹窗 -->
+  <div class="modal-overlay" id="registerLeaveModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">⏱️ 登记学生请假</div>
+        <button class="drawer-close-btn" onclick="window.closeRegisterLeaveModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>学生姓名 *</label>
+          <input type="text" class="form-control" id="leaveStudentName" placeholder="输入学生姓名，如：李小红">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>请假类型</label>
+            <select class="form-control" id="leaveType">
+              <option value="casual_leave">事假</option>
+              <option value="sick_leave">病假</option>
+              <option value="official_leave">公假</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>请假天数</label>
+            <input type="number" class="form-control" value="1" min="0.5" step="0.5">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>请假事由说明</label>
+          <textarea class="form-control" id="leaveReason" placeholder="家长告知的详细请假原因与去向..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeRegisterLeaveModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitRegisterLeave()">确认登记</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 15. 快速打分弹窗 -->
+  <div class="modal-overlay" id="quickScoreModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">🏆 快速量化加扣分</div>
+        <button class="drawer-close-btn" onclick="window.closeQuickScoreModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>选择奖惩对象 *</label>
+          <select class="form-control" id="scoreTargetSelect">
+            <!-- 动态生成全班45名学生与小组快捷选项 -->
+          </select>
+          <input type="hidden" id="scoreStudentName">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>分值变动</label>
+            <select class="form-control" id="scoreDelta">
+              <option value="1">➕ 奖励 +1分</option>
+              <option value="2" selected>➕ 奖励 +2分</option>
+              <option value="3">➕ 奖励 +3分</option>
+              <option value="5">🌟 重大表彰 +5分</option>
+              <option value="-1">➖ 扣除 -1分</option>
+              <option value="-2">➖ 扣除 -2分</option>
+              <option value="-3">⚠️ 严重违规 -3分</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>对应分类</label>
+            <select class="form-control">
+              <option>课堂表现</option>
+              <option>作业书写</option>
+              <option>卫生值日</option>
+              <option>文明守纪</option>
+              <option>体育活动</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>加扣分原因说明</label>
+          <input type="text" class="form-control" id="scoreReason" value="课堂主动举手发言，思路活跃" placeholder="原因说明...">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeQuickScoreModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitQuickScore()">确认执行</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 16. 登记 1530 安全教育台账弹窗 (升级为完整台账排版 + 附件上传 + 类型自定义) -->
+  <div class="modal-overlay" id="addSafetyModal">
+    <div class="modal-dialog" style="max-width: 680px;">
+      <div class="modal-header">
+        <div class="modal-title">🛡️ 登记 1530 安全教育台账</div>
+        <button class="drawer-close-btn" onclick="window.closeAddSafetyModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>开展日期 *</label>
+            <input type="date" class="form-control" id="addSafetyDate">
+          </div>
+          <div class="form-group">
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>教育类型 *</span>
+              <a href="javascript:void(0)" onclick="window.openSafetyTypeManageModal()"
+                style="font-size: 11.5px; color: #2563eb; text-decoration: none; font-weight: normal;">⚙️ 自定义类型</a>
+            </label>
+            <select class="form-control" id="safetyTypeSelect">
+              <!-- 动态注入教育类型 -->
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>教育主题 *</label>
+          <input type="text" class="form-control" id="safetyTopicInput" placeholder="如：交通安全与放学路队安全">
+        </div>
+        <div class="form-group">
+          <label>教育核心内容要点 *</label>
+          <textarea class="form-control" id="safetyContentInput" style="min-height: 80px;"
+            placeholder="放学有序排队离校，不横穿马路，过十字路口走人行横道看红绿灯，严禁在马路上追逐打闹..."></textarea>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>教育形式</label>
+            <input type="text" class="form-control" id="safetyMethodInput" value="口头提醒 + 强调">
+          </div>
+          <div class="form-group">
+            <label>受教人数</label>
+            <input type="number" class="form-control" id="safetyParticipantsInput" value="45">
+          </div>
+          <div class="form-group">
+            <label>宣讲人</label>
+            <input type="text" class="form-control" id="safetyTeacherInput" value="李老师">
+          </div>
+        </div>
+
+        <!-- 留痕材料与附件上传区 (格式不限：图片、视频、PPT、Word等) -->
+        <div class="form-group" style="margin-top: 6px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="font-weight: 700; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 6px;">
+              <span>📎 留痕佐证凭证附件</span>
+              <span
+                style="font-size: 11px; color: #64748b; font-weight: normal;">(格式不限：支持图片/视频/PPT/Word/PDF等任意文件)</span>
+            </label>
+            <button type="button" class="btn btn-sm btn-outline-primary" style="font-size: 11.5px; padding: 2px 10px;"
+              onclick="document.getElementById('addSafetyAttachmentFile').click()">
+              ➕ 上传附件
+            </button>
+          </div>
+          <input type="file" id="addSafetyAttachmentFile" multiple style="display: none;"
+            onchange="window.handleSafetyAttachmentUpload(event, 'add')">
+          <div id="addSafetyDropZone" onclick="document.getElementById('addSafetyAttachmentFile').click()"
+            style="border: 1.5px dashed #cbd5e1; border-radius: 8px; padding: 12px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s;"
+            onmouseenter="this.style.borderColor='#93c5fd'" onmouseleave="this.style.borderColor='#cbd5e1'">
+            <div style="font-size: 22px;">📁</div>
+            <div style="font-size: 12.5px; color: #475569; font-weight: 600; margin-top: 2px;">点击选择或拖拽上传证明材料</div>
+            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">可上传 PPT 课件、Word 宣讲文稿、宣讲视频短片、现场留痕照片等</div>
+          </div>
+          <div id="addSafetyAttachmentList" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddSafetyModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddSafety()">保存归档</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 17. 新增班级活动弹窗 -->
+  <div class="modal-overlay" id="addActivityModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">🎉 新建班级活动</div>
+        <button class="drawer-close-btn" onclick="window.closeAddActivityModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>活动名称 *</label>
+          <input type="text" class="form-control" id="actNameInput" placeholder="如：秋季科技创新主题班会">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>活动类型</label>
+            <select class="form-control" id="actTypeInput">
+              <option value="主题班会">主题班会</option>
+              <option value="家长会">家长会</option>
+              <option value="运动会">运动会</option>
+              <option value="艺术节">艺术节</option>
+              <option value="研学活动">研学活动</option>
+              <option value="生日会">生日会</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>开展日期</label>
+            <input type="date" class="form-control" id="actDateInput">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>开展地点</label>
+          <input type="text" class="form-control" id="actLocationInput" value="本班教室">
+        </div>
+        <div class="form-group">
+          <label>活动方案与概要说明</label>
+          <textarea class="form-control" id="actSummaryInput" placeholder="活动目标、流程安排与分工..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddActivityModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddActivity()">确认创建</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 18. AI 评语生成助手弹窗 (全维学情画像综合联动 + OpenAI 兼容多模型) -->
+  <div class="modal-overlay" id="aiPingyuModal">
+    <div class="modal-dialog modal-lg" style="max-width: 860px;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #f5f3ff, #ede9fe); padding: 14px 20px;">
+        <div class="modal-title" style="color: #6d28d9; display: flex; align-items: center; gap: 10px;">
+          <span>🤖 AI 智能综合评语生成助手</span>
+          <span id="aiEngineBadge" class="badge" style="background: #e0e7ff; color: #4338ca; font-size: 11px;">
+            检测大模型状态中...
+          </span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeAIPingyuModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 18px 22px;">
+        <!-- 第一行：学生选择、系统提示词选择、应用场景 -->
+        <div class="form-row-3" style="margin-bottom: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label style="font-weight: 700; color: #334155;">目标学生 *</label>
+            <select class="form-control" id="aiStudentSelect" onchange="window.handleAIPingyuStudentChange(this.value)" style="font-weight: 600; color: #1e1b4b;">
+              <!-- 动态装配全班学生 -->
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label style="font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between;">
+              <span>选用系统提示词 *</span>
+              <a href="javascript:void(0)" onclick="window.openAIPromptManagerModal();" style="font-size: 11px; color: #6366f1; text-decoration: underline; cursor: pointer;" title="管理系统评语词库、新增或编辑提示词模板">⚙️ 管理词库</a>
+            </label>
+            <select class="form-control" id="aiPingyuPromptSelect" onchange="window.handleAIPingyuPromptChange ? window.handleAIPingyuPromptChange(this.value) : null" style="font-size: 13px;">
+              <!-- 动态装配系统提示词 -->
+            </select>
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label style="font-weight: 700; color: #334155;">评语应用场景</label>
+            <select class="form-control" id="aiPingyuTypeSelect" onchange="window.handleAIPingyuSceneChange ? window.handleAIPingyuSceneChange(this.value) : null" style="font-size: 13px;">
+              <option value="term" selected>期末素质手册官方综合评语 (正式)</option>
+              <option value="monthly">月度成长与学情综合评述</option>
+              <option value="weekly">周自律与学习习惯小结</option>
+              <option value="parent">家校协同温情关怀寄语</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 第二行：学生全维综合学情画像实时雷达卡片 -->
+        <div id="aiStudentProfileCard" style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 12px;">
+          <!-- 动态渲染当前学生的考试、考勤、作业、小红花等全维学情画像 -->
+        </div>
+
+        <!-- 第三行：教师个性化补充要求 (选填) -->
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label style="font-weight: 700; color: #334155; display: flex; align-items: center; justify-content: space-between;">
+            <span>班主任个性化补充关注 / 重点寄语要求 (选填)：</span>
+            <span style="font-size: 11px; color: var(--text-muted);">大模型与评语引擎将深度结合此条要求进行针对性点题</span>
+          </label>
+          <input type="text" class="form-control" id="aiTeacherFocusInput" placeholder="例如：希望重点鼓励他在全班勇敢举手发言，并肯定其最近早读带读很认真..." style="font-size: 13px;">
+        </div>
+
+        <!-- 操作与状态指示行 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+          <div id="aiGenerateStatusArea" style="font-size: 12.5px; color: #475569; display: flex; align-items: center; gap: 6px;">
+            <span>🎯 画像已自动抽取融合（学科成绩+考勤纪律+日常作业+成长事件）</span>
+          </div>
+          <button class="btn btn-primary" id="btnDoGeneratePingyu" onclick="window.generateAIPingyu(true)" style="background: linear-gradient(135deg, #7c3aed, #4f46e5); font-weight: 700; padding: 6px 18px;">
+            ⚡ 立即生成个性化评语
+          </button>
+        </div>
+
+        <!-- 第四行：生成结果文本框与字数统计 -->
+        <div class="form-group" style="margin-bottom: 0;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+            <label style="font-weight: 700; color: #334155; margin-bottom: 0;">生成的个性化评语正文（支持随时直接修改二次润色）：</label>
+            <span id="aiWordCountBadge" style="font-size: 11.5px; color: #64748b; font-family: monospace;">0 字</span>
+          </div>
+          <textarea class="form-control" id="aiGeneratedText" oninput="window.updateAIPingyuWordCount()"
+            style="min-height: 150px; font-size: 14px; line-height: 1.75; background: #faf5ff; border-color: #d8b4fe; color: #1e1b4b; border-radius: var(--radius-md);"
+            placeholder="系统已默认使用评分系统生成评语初稿；点击上方【⚡ 立即生成个性化评语】按钮可调用大模型进行个性化深度润色撰写..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.closeAIPingyuModal()">关闭</button>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-secondary" onclick="window.savePingyuToGrowthEvent()" id="btnSaveToGrowth" style="background: #f0fdf4; color: #15803d; border-color: #86efac; font-weight: 600;">
+            🌱 存入该生成长表现
+          </button>
+          <button class="btn btn-success" onclick="window.copyAIPingyu()" style="font-weight: 700;">
+            📋 一键复制评语
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 18.0 AI 评语系统提示词库集中管理弹窗 -->
+  <div class="modal-overlay" id="aiPromptManagerModal" style="z-index: 120;">
+    <div class="modal-dialog modal-lg" style="width: 780px; max-width: 95vw; max-height: 88vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #ede9fe, #f5f3ff); border-bottom: 1px solid #ddd6fe; padding: 14px 20px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <div>
+            <div class="modal-title" style="color: #6d28d9; font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+              <span>📝 AI 评语系统提示词库管理</span>
+              <span class="badge badge-purple" id="aiPromptManagerCountBadge">-- 套模板</span>
+            </div>
+            <div style="font-size: 12px; color: #6b7280; margin-top: 3px;">
+              定义评语撰写时的核心原则、角色定位与段落结构规范。点击【选用此模板】可立即在评语生成器中应用。
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-sm btn-primary" onclick="window.openAIPromptEditModal(null)" style="background: linear-gradient(135deg, #7c3aed, #4f46e5); font-weight: 700; padding: 5px 12px; font-size: 12px;">
+              ➕ 新增自定义提示词
+            </button>
+            <button class="drawer-close-btn" onclick="window.closeAIPromptManagerModal()">✕</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-body" style="padding: 16px 20px; overflow-y: auto; max-height: calc(88vh - 125px);">
+        <!-- 搜索与快捷跳转栏 -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px;">
+          <input type="text" id="aiPromptSearchInput" class="form-control" placeholder="🔍 快速搜索提示词模板名称、分类或内容关键词..." 
+                 oninput="window.renderAIPromptManagerList()" style="font-size: 13px; padding: 6px 12px; flex: 1;">
+          <button class="btn btn-sm btn-secondary" onclick="window.goToClassSettingsPrompts()" style="font-size: 12px; padding: 6px 12px; white-space: nowrap;" title="跳转到班级设置页查看全部大模型与词库设置">
+            ⚙ 前往班级系统设置页 ›
+          </button>
+        </div>
+
+        <!-- 提示词列表容器 -->
+        <div id="aiPromptManagerListContainer" style="display: flex; flex-direction: column; gap: 10px;">
+          <!-- 动态装配提示词卡片 -->
+        </div>
+      </div>
+      <div class="modal-footer" style="padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 12px; color: #64748b;">💡 提示词与当前登录教师账号独立隔离绑定</span>
+        <button class="btn btn-secondary" onclick="window.closeAIPromptManagerModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 18.1 系统提示词新增/编辑模态弹窗 -->
+  <div class="modal-overlay" id="aiPromptEditModal" style="z-index: 130;">
+    <div class="modal-dialog modal-md">
+      <div class="modal-header" style="background: linear-gradient(135deg, #ede9fe, #f5f3ff);">
+        <div class="modal-title" style="color: #6d28d9;">
+          <span id="aiPromptModalTitle">➕ 新增自定义系统提示词</span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeAIPromptEditModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="aiPromptEditId">
+        <div class="form-group">
+          <label style="font-weight: 700; color: #334155;">提示词模板名称 *</label>
+          <input type="text" class="form-control" id="aiPromptEditTitle" placeholder="例如: 期末综合素质报告手册官方评语">
+        </div>
+        <div class="form-group">
+          <label style="font-weight: 700; color: #334155;">分类标签</label>
+          <input type="text" class="form-control" id="aiPromptEditCategory" placeholder="例如: 期末综合 / 学科学法 / 个性激励 / 家校温情">
+        </div>
+        <div class="form-group">
+          <label style="font-weight: 700; color: #334155;">系统提示词核心内容 (System Prompt) *</label>
+          <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">定义大模型的角色设定、评语撰写核心原则、结构段落及字数要求</div>
+          <textarea class="form-control" id="aiPromptEditContent" style="min-height: 180px; font-size: 13px; line-height: 1.6;" placeholder="请输入系统提示词内容..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAIPromptEditModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.saveAIPromptFromModal()">💾 确认保存提示词</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 19. 单人学情诊断弹窗 -->
+  <div class="modal-overlay" id="studentAcademicModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>📊 学生学情深度诊断详情</span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeStudentAcademicDetail()">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- 科目与总分切换选项卡 -->
+        <div
+          style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+          <div class="tab-pills" id="academicSubjectTabs">
+            <div class="tab-pill active" data-sub="total" onclick="window.switchAcademicDetailSubject('total', this)">🌟
+              全科综合诊断</div>
+            <div class="tab-pill" data-sub="语文" onclick="window.switchAcademicDetailSubject('语文', this)">📖 语文</div>
+            <div class="tab-pill" data-sub="数学" onclick="window.switchAcademicDetailSubject('数学', this)">📐 数学</div>
+            <div class="tab-pill" data-sub="英语" onclick="window.switchAcademicDetailSubject('英语', this)">🔤 英语</div>
+            <div class="tab-pill" data-sub="科学" onclick="window.switchAcademicDetailSubject('科学', this)">🔬 科学</div>
+          </div>
+          <div id="modalSubjectRankBadge" class="badge badge-purple" style="font-size: 12px; padding: 4px 10px;">
+            班级单科排名：第 1 名</div>
+        </div>
+
+        <div
+          style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: #f8fafc; border-radius: var(--radius-lg); margin-bottom: 16px; border: 1px solid #e2e8f0;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="font-size: 32px;" id="modalStudentAvatar">👦</div>
+            <div>
+              <div style="font-size: 18px; font-weight: 800; color: #1e293b;" id="modalStudentName">学生姓名</div>
+              <div style="font-size: 12.5px; color: var(--text-muted);" id="modalDiagnoseSubtitle">第三单元质量测验 · 全科综合学情分析报告
+              </div>
+            </div>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 28px; font-weight: 900; color: #16a34a;" id="modalStudentScore">99 <span
+                style="font-size: 13px; font-weight: normal; color: #64748b;">分</span></div>
+            <div style="font-size: 12px; font-weight: 700; color: #16a34a;" id="modalStudentTrend">较上次进步 +5 分</div>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+          <div
+            style="padding: 12px 14px; background: #eff6ff; border-radius: var(--radius-md); border: 1px solid #bfdbfe;">
+            <strong style="color: #1e40af; font-size: 13px;" id="modalAdvantageTitle">💡 优势能力与得分亮点：</strong>
+            <div style="font-size: 12.5px; color: #1e3a8a; margin-top: 4px; line-height: 1.5;" id="modalAdvantageText">
+              基础概念扎实，逻辑推理严谨，卷面整洁度满分</div>
+          </div>
+          <div
+            style="padding: 12px 14px; background: #fffbeb; border-radius: var(--radius-md); border: 1px solid #fef3c7;">
+            <strong style="color: #b45309; font-size: 13px;" id="modalSuggestTitle">🎯 发展薄弱点与提分策略：</strong>
+            <div style="font-size: 12.5px; color: #78350f; margin-top: 4px; line-height: 1.5;" id="modalSuggestText">
+              拓展课外高阶思维题，保持细致复查的好习惯</div>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 16px;">
+          <div class="panel-header" style="margin-bottom: 8px;">
+            <div class="panel-title" style="font-size: 14px;" id="modalTrendChartTitle">📈 历次考试成绩变化走势</div>
+            <span class="badge badge-success" id="modalStudentLevel">优秀</span>
+          </div>
+          <div style="height: 180px; position: relative;">
+            <canvas id="studentPersonalTrendChart"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeStudentAcademicDetail()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 20. 班级活动图文纪要与总结反思弹窗 -->
+  <div class="modal-overlay" id="activitySummaryModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>📄 班级活动图文纪要与总结反思</span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeActivitySummaryModal()">✕</button>
+      </div>
+      <div class="modal-body" id="activitySummaryContent" style="max-height: 70vh; overflow-y: auto;">
+        <!-- 由 JS 动态渲染 -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeActivitySummaryModal()">关闭</button>
+        <button class="btn btn-secondary" onclick="window.copyActivitySummaryText()">📋 复制文字纪要</button>
+        <button class="btn btn-primary" onclick="window.printActivitySummary()">🖨️ 打印/导出纪要 (PDF)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 21. 班级活动成长相册墙弹窗 -->
+  <div class="modal-overlay" id="activityAlbumModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span id="albumModalTitle">📷 班级活动成长相册墙</span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeActivityAlbumModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div
+          style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div class="tab-pills" id="albumCategoryTabs">
+            <div class="tab-pill active" onclick="window.filterAlbumPhotos('all', this)">全部相片</div>
+            <div class="tab-pill" onclick="window.filterAlbumPhotos('精彩瞬间', this)">精彩瞬间</div>
+            <div class="tab-pill" onclick="window.filterAlbumPhotos('集体合影', this)">集体合影</div>
+            <div class="tab-pill" onclick="window.filterAlbumPhotos('作品展示', this)">作品展示</div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-sm btn-primary" onclick="document.getElementById('albumLocalImageInput').click()">📁
+              上传电脑本地照片</button>
+            <button class="btn btn-sm btn-secondary" onclick="window.openAddPhotoPrompt()">➕ 快捷录入相片</button>
+            <button class="btn btn-sm btn-secondary" onclick="window.showToast('已打包下载本活动全部高清照片压缩包！', 'success')">📥
+              批量打包下载</button>
+          </div>
+        </div>
+
+        <div class="album-photo-grid" id="albumPhotosContainer"
+          style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;">
+          <!-- 动态相片卡片 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeActivityAlbumModal()">关闭相册</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 22. 班级量化积分与宠物成长规则配置弹窗 -->
+  <div class="modal-overlay" id="scoreRulesModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>⚙️ 班级量化积分与萌宠成长换算规则</span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeScoreRulesModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div
+          style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; font-size: 13px; color: #1e40af; line-height: 1.6;">
+          💡
+          <strong>规则说明：</strong>本规则将学生的<strong>学科作业完成</strong>、<strong>历次考试得分</strong>、<strong>每日考勤状态</strong>与<strong>日常好人好事</strong>直接换算为量化积分，并实时驱动其专属萌宠的<strong>经验增长与等级蜕变（Lv.1
+            ~ Lv.5）</strong>。
+        </div>
+
+        <div class="card" style="padding: 16px; margin-bottom: 14px;">
+          <h4 style="margin-bottom: 12px; font-size: 14.5px; color: #1e293b;">1. 基础分与作业考核</h4>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>学生基础起步分</label>
+              <input type="number" class="form-control" id="ruleBaseScore" value="80">
+            </div>
+            <div class="form-group">
+              <label>按时提交作业 (每门)</label>
+              <input type="number" class="form-control" id="ruleHwSubmit" value="5">
+            </div>
+            <div class="form-group">
+              <label>拖欠/未交作业 (每次扣分)</label>
+              <input type="number" class="form-control" id="ruleHwUnsubmit" value="-2">
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 16px; margin-bottom: 14px;">
+          <h4 style="margin-bottom: 12px; font-size: 14.5px; color: #1e293b;">2. 考试测验考核激励</h4>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>考试优秀 (≥90分)</label>
+              <input type="number" class="form-control" id="ruleExamExcellent" value="20">
+            </div>
+            <div class="form-group">
+              <label>考试良好 (80-89分)</label>
+              <input type="number" class="form-control" id="ruleExamGood" value="10">
+            </div>
+            <div class="form-group">
+              <label>考试及格 (60-79分)</label>
+              <input type="number" class="form-control" id="ruleExamPass" value="5">
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 16px; margin-bottom: 14px;">
+          <h4 style="margin-bottom: 12px; font-size: 14.5px; color: #1e293b;">3. 考勤纪律与德育奖励</h4>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>今日正常全勤奖励</label>
+              <input type="number" class="form-control" id="ruleAttNormal" value="5">
+            </div>
+            <div class="form-group">
+              <label>迟到扣分</label>
+              <input type="number" class="form-control" id="ruleAttLate" value="-2">
+            </div>
+            <div class="form-group">
+              <label>无故缺勤旷课扣分</label>
+              <input type="number" class="form-control" id="ruleAttAbsent" value="-5">
+            </div>
+          </div>
+          <div class="form-row-2" style="margin-top: 10px; border-top: 1px dashed #e2e8f0; padding-top: 10px;">
+            <div class="form-group">
+              <label style="display: flex; align-items: center; gap: 6px;">
+                <span>🌸 每朵小红花折算分值 (分/朵)</span>
+                <span class="badge badge-success" style="font-size: 11px;">自定义分值</span>
+              </label>
+              <input type="number" class="form-control" id="ruleFlowerValue" value="3" min="1" max="100"
+                placeholder="默认3分">
+            </div>
+            <div class="form-group">
+              <label>德育常规正向激励分值 (无小红花时)</label>
+              <input type="number" class="form-control" id="ruleGrowthAward" value="3" min="1" max="50">
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="padding: 16px; background: #fafafa;">
+          <h4 style="margin-bottom: 8px; font-size: 14px; color: #334155;">4. 萌宠等级晋升阶梯标准</h4>
+          <div style="font-size: 12.5px; color: #64748b; line-height: 1.8;">
+            🌱 <strong>Lv.1 幼年期：</strong>0 ~ 89 分 &nbsp;|&nbsp;
+            🌿 <strong>Lv.2 成长期：</strong>90 ~ 119 分 &nbsp;|&nbsp;
+            ✨ <strong>Lv.3 进阶期：</strong>120 ~ 159 分<br>
+            🔥 <strong>Lv.4 究极期：</strong>160 ~ 199 分 &nbsp;|&nbsp;
+            👑 <strong>Lv.5 传说守护神：</strong>200 分及以上
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.resetDefaultScoreRules()">恢复默认分值</button>
+        <button class="btn btn-secondary" onclick="window.store.exportScoreRulesExcel()">📤 导出规则模板</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('excelQuantScoreInput').click()">📥
+          导入规则/积分</button>
+        <button class="btn btn-primary" onclick="window.saveAndRecalcScoreRules()">💾 保存规则并一键重新核算全员</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 23. 单独修改学生个人档案弹窗 -->
+  <div class="modal-overlay" id="editStudentModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 单独修改学生档案信息</div>
+        <button class="drawer-close-btn" onclick="window.closeEditStudentModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 72vh; overflow-y: auto;">
+        <input type="hidden" id="editStuOriginalId">
+
+        <!-- 学生档案真实照片头像上传与调整栏 -->
+        <div
+          style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 14px;">
+            <div id="editStuAvatarPreview" class="student-photo-avatar"
+              style="width: 76px; height: 76px; background: #e0f2fe; color: #0369a1; font-size: 38px; border: 2.5px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.12);">
+              👦
+            </div>
+            <div>
+              <div style="font-size: 14px; font-weight: 700; color: #1e293b; margin-bottom: 2px;">学生真实档案照片</div>
+              <div style="font-size: 12px; color: var(--text-muted);">支持上传免冠证件照/生活照，上传后可拖拽将面部置于正中圆心</div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <input type="hidden" id="editStuAvatarUrl" value="">
+            <button type="button" class="btn btn-sm btn-primary" onclick="window.triggerStudentAvatarUpload('edit')">📷
+              上传真实照片</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="editStuCropAdjustBtn"
+              onclick="window.openCurrentAvatarForCropping('edit')" style="display: none;">✂️ 拖拽居中调整</button>
+            <button type="button" class="btn btn-sm btn-secondary" id="editStuRemoveAvatarBtn"
+              onclick="window.removeStudentAvatar('edit')" style="display: none;">🗑️ 恢复默认</button>
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>学生姓名 *</label>
+            <input type="text" class="form-control" id="editStuName" placeholder="如：张明">
+          </div>
+          <div class="form-group">
+            <label>性别</label>
+            <select class="form-control" id="editStuGender">
+              <option value="男">男 👦</option>
+              <option value="女">女 👧</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>民族</label>
+            <input type="text" class="form-control" id="editStuNation" placeholder="如：汉族">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>学号</label>
+            <input type="text" class="form-control" id="editStuId">
+          </div>
+          <div class="form-group">
+            <label>出生日期</label>
+            <input type="date" class="form-control" id="editStuBirthday">
+          </div>
+          <div class="form-group">
+            <label>身份证号码 (18位) *</label>
+            <input type="text" class="form-control" id="editStuIdCard" placeholder="如：110101201605151234"
+              maxlength="18">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>所在小组</label>
+            <select class="form-control" id="editStuGroup">
+              <option value="1">第1组</option>
+              <option value="2">第2组</option>
+              <option value="3">第3组</option>
+              <option value="4">第4组</option>
+              <option value="5">第5组</option>
+              <option value="6">第6组</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>班级职务</label>
+            <input type="text" class="form-control" id="editStuRole" placeholder="如：班长 / 学生">
+          </div>
+          <div class="form-group">
+            <label>座位编号</label>
+            <input type="text" class="form-control" id="editStuSeat" placeholder="如：第1排左1">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>监护人姓名</label>
+            <input type="text" class="form-control" id="editStuGuardian" placeholder="如：张先生">
+          </div>
+          <div class="form-group">
+            <label>联系电话</label>
+            <input type="text" class="form-control" id="editStuPhone" placeholder="如：13800000000">
+          </div>
+          <div class="form-group">
+            <label>上下学接送方式</label>
+            <select class="form-control" id="editStuPickup">
+              <option value="家长接送">家长接送</option>
+              <option value="校车接送">校车接送</option>
+              <option value="自行回家">自行回家</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label style="color: #059669; font-weight: 700;">🏡 户口所在地 / 户籍地址 *</label>
+            <input type="text" class="form-control" id="editStuHukou" placeholder="如：大坪乡来苏村委会十三组">
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label>📍 现居住常住地址</label>
+            <input type="text" class="form-control" id="editStuAddress" placeholder="如：隽水镇白沙社区居委会四庄路银山金城二期">
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>是否留守儿童</label>
+            <select class="form-control" id="editStuLeftBehind">
+              <option value="否">否</option>
+              <option value="是">是 (重点关爱)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>家庭困难类别 (数字1-7或文字)</label>
+            <input type="text" class="form-control" id="editStuHardship" placeholder="如：1 或 无">
+          </div>
+          <div class="form-group">
+            <label>健康状况与过敏史提醒</label>
+            <input type="text" class="form-control" id="editStuAllergies" placeholder="如：芒果过敏，无特殊病史">
+          </div>
+        </div>
+
+        <div class="form-group"
+          style="background: #f8fafc; padding: 12px; border-radius: var(--radius-md); border: 1px solid #e2e8f0; margin-top: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="font-weight: 700; color: #1e293b; margin: 0;">🏷️ 学生成长个性标签 (支持同时多选)</label>
+            <span style="font-size: 11.5px; color: var(--text-muted);">💡 单击徽章即可勾选或取消</span>
+          </div>
+          <div id="editStuTagsChipsContainer" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+            <!-- JS 动态渲染多选徽章 -->
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="text" class="form-control" id="editStuCustomTagInput" placeholder="输入自拟新标签..."
+              style="max-width: 180px; height: 32px; font-size: 12.5px;">
+            <button class="btn btn-sm btn-secondary" onclick="window.quickAddAndSelectCustomTag('edit')">➕ 贴新标签</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditStudentModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditStudent()">保存修改档案</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 24. 修改作息节次时间表弹窗 -->
+  <div class="modal-overlay" id="editTimetablePeriodsModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">⏰ 班级作息时间与课表节次管理</div>
+        <button class="drawer-close-btn" onclick="window.closeEditTimetablePeriodsModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 74vh; overflow-y: auto;">
+        <div
+          style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #1e40af;">
+          💡 支持自由增减课表节次（如添加晨读、第7节、第8节、课后延时服务等），可自由修改节次名称与起止作息时间，保存后全系统班级课表与作息安排同步生效。
+        </div>
+        <div id="timetablePeriodsFormContainer" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <!-- JS 动态填充节次卡片与操作栏 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.resetDefaultTimetablePeriods()">恢复标准作息</button>
+        <button class="btn btn-secondary" onclick="window.closeEditTimetablePeriodsModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditTimetablePeriods()">保存课表作息</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 25. 批量编辑全班座位弹窗 -->
+  <div class="modal-overlay" id="editAllSeatsModal">
+    <div class="modal-dialog modal-lg" style="max-width: 900px;">
+      <div class="modal-header">
+        <div class="modal-title">🪑 批量编辑与调整全班座位</div>
+        <button class="drawer-close-btn" onclick="window.closeEditAllSeatsModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <div
+          style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 12px; font-size: 12.5px; color: #475569; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; font-weight: 600;">
+            <span>📐 教室排布自定义：</span>
+            <span>排数</span>
+            <input type="number" id="bulkSeatsRows" class="form-control"
+              style="width: 62px; height: 30px; text-align: center;" value="8" min="1" max="15">
+            <span>排 &nbsp;×&nbsp; 列数</span>
+            <input type="number" id="bulkSeatsCols" class="form-control"
+              style="width: 62px; height: 30px; text-align: center;" value="6" min="1" max="15">
+            <span>列</span>
+            <button class="btn btn-sm btn-primary" onclick="window.applyBulkSeatsDimension()">应用新行列</button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm btn-secondary" onclick="window.randomizeSeatArrangement()">🎲 随机打乱</button>
+            <button class="btn btn-sm btn-secondary" onclick="document.getElementById('excelSeatingInput').click()">📥
+              导入Excel排布</button>
+          </div>
+        </div>
+        <div class="blackboard-indicator"
+          style="text-align: center; background: #0f172a; color: #94a3b8; border-radius: 6px; padding: 6px; font-weight: 700; margin-bottom: 12px;">
+          ── 讲 台 (前门方向) ──
+        </div>
+        <div id="allSeatsGridEditor" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;">
+          <!-- JS 动态填充 48 个座位的输入框 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditAllSeatsModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditAllSeats()">保存座位排布</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 26. 登记作业提交名单弹窗 (已交/未交区分) -->
+  <div class="modal-overlay" id="checkHomeworkSubmitModal">
+    <div class="modal-dialog modal-lg" style="max-width: 860px;">
+      <div class="modal-header">
+        <div class="modal-title" id="checkHwModalTitle">📋 登记学科作业提交名单</div>
+        <button class="drawer-close-btn" onclick="window.closeCheckHomeworkSubmitModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <input type="hidden" id="checkHwId">
+        <div
+          style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <div style="font-size: 14px; font-weight: 700; color: #1e293b;" id="checkHwStatText">
+              已交: <span style="color: #16a34a;" id="checkHwSubmittedCount">0</span> 人 &nbsp;|&nbsp;
+              未交: <span style="color: #dc2626;" id="checkHwUnsubmittedCount">0</span> 人 (共45人)
+            </div>
+            <span class="badge badge-success" id="checkHwRateBadge">0% 提交率</span>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm btn-secondary" onclick="window.markBatchHomeworkSubmit(true)">✅ 全部设为已交</button>
+            <button class="btn btn-sm btn-secondary" onclick="window.markBatchHomeworkSubmit(false)">❌ 全部设为未交</button>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <input type="text" class="form-control" id="checkHwSearchInput" placeholder="🔍 快速搜索学生姓名/学号..."
+            oninput="window.filterHomeworkSubmitStudents()">
+        </div>
+
+        <!-- 双栏显示：左侧已交，右侧未交 -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: var(--radius-md); padding: 12px;">
+            <div
+              style="font-weight: 700; color: #166534; font-size: 13.5px; margin-bottom: 8px; display: flex; justify-content: space-between;">
+              <span>🟢 已提交名单 (点击卡片移至未交)</span>
+              <span id="submittedColCount" style="font-size: 12px; font-weight: normal;">0人</span>
+            </div>
+            <div id="hwSubmittedListContainer"
+              style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 320px; overflow-y: auto;">
+              <!-- 动态已交卡片 -->
+            </div>
+          </div>
+
+          <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: var(--radius-md); padding: 12px;">
+            <div
+              style="font-weight: 700; color: #991b1b; font-size: 13.5px; margin-bottom: 8px; display: flex; justify-content: space-between;">
+              <span>🔴 未提交名单 (点击卡片登记已交)</span>
+              <span id="unsubmittedColCount" style="font-size: 12px; font-weight: normal;">0人</span>
+            </div>
+            <div id="hwUnsubmittedListContainer"
+              style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 320px; overflow-y: auto;">
+              <!-- 动态未交卡片 -->
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeCheckHomeworkSubmitModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitCheckHomeworkSubmit()">保存提交状态</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 27. 编辑班级通知弹窗 -->
+  <div class="modal-overlay" id="editNoticeModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 编辑班级通知</div>
+        <button class="drawer-close-btn" onclick="window.closeEditNoticeModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editNoticeId">
+        <div class="form-group">
+          <label>通知标题 *</label>
+          <input type="text" class="form-control" id="editNoticeTitle">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>回执截止时间</label>
+            <input type="date" class="form-control" id="editNoticeDeadline">
+          </div>
+          <div class="form-group">
+            <label style="margin-top: 28px; display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="editNoticeReceiptCheck" style="width:16px; height:16px;"> 强制要求家长确认回执
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>通知详细正文内容 *</label>
+          <textarea class="form-control" id="editNoticeContent" style="min-height: 120px;"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditNoticeModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditNotice()">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 28. 编辑 1530 安全教育台账弹窗 (升级支持类型自定义与附件上传) -->
+  <div class="modal-overlay" id="editSafetyModal">
+    <div class="modal-dialog" style="max-width: 680px;">
+      <div class="modal-header">
+        <div class="modal-title">✏️ 编辑 1530 安全教育留痕台账</div>
+        <button class="drawer-close-btn" onclick="window.closeEditSafetyModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <input type="hidden" id="editSafetyIndex">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>开展日期 *</label>
+            <input type="date" class="form-control" id="editSafetyDate">
+          </div>
+          <div class="form-group">
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              <span>教育类型 *</span>
+              <a href="javascript:void(0)" onclick="window.openSafetyTypeManageModal()"
+                style="font-size: 11.5px; color: #2563eb; text-decoration: none; font-weight: normal;">⚙️ 自定义类型</a>
+            </label>
+            <select class="form-control" id="editSafetyType">
+              <!-- 动态注入教育类型 -->
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>教育主题 *</label>
+          <input type="text" class="form-control" id="editSafetyTopic">
+        </div>
+        <div class="form-group">
+          <label>教育核心内容要点 *</label>
+          <textarea class="form-control" id="editSafetyContent" style="min-height: 80px;"></textarea>
+        </div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label>教育形式</label>
+            <input type="text" class="form-control" id="editSafetyMethod" value="口头宣讲+黑板提示">
+          </div>
+          <div class="form-group">
+            <label>受教人数</label>
+            <input type="number" class="form-control" id="editSafetyParticipants" value="45">
+          </div>
+          <div class="form-group">
+            <label>宣讲人</label>
+            <input type="text" class="form-control" id="editSafetyTeacher" value="班主任">
+          </div>
+        </div>
+
+        <!-- 留痕材料与附件管理区 (格式不限：图片、视频、PPT、Word等) -->
+        <div class="form-group" style="margin-top: 6px; padding-top: 10px; border-top: 1px dashed #e2e8f0;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="font-weight: 700; color: #1e293b; margin: 0; display: flex; align-items: center; gap: 6px;">
+              <span>📎 留痕佐证凭证附件</span>
+              <span
+                style="font-size: 11px; color: #64748b; font-weight: normal;">(格式不限：支持图片/视频/PPT/Word/PDF等任意文件)</span>
+            </label>
+            <button type="button" class="btn btn-sm btn-outline-primary" style="font-size: 11.5px; padding: 2px 10px;"
+              onclick="document.getElementById('editSafetyAttachmentFile').click()">
+              ➕ 上传新附件
+            </button>
+          </div>
+          <input type="file" id="editSafetyAttachmentFile" multiple style="display: none;"
+            onchange="window.handleSafetyAttachmentUpload(event, 'edit')">
+          <div id="editSafetyDropZone" onclick="document.getElementById('editSafetyAttachmentFile').click()"
+            style="border: 1.5px dashed #cbd5e1; border-radius: 8px; padding: 12px; text-align: center; background: #f8fafc; cursor: pointer; transition: all 0.2s;"
+            onmouseenter="this.style.borderColor='#93c5fd'" onmouseleave="this.style.borderColor='#cbd5e1'">
+            <div style="font-size: 22px;">📁</div>
+            <div style="font-size: 12.5px; color: #475569; font-weight: 600; margin-top: 2px;">点击选择或拖拽上传证明材料</div>
+            <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">可上传 PPT 课件、Word 宣讲文稿、宣讲视频短片、现场留痕照片等</div>
+          </div>
+          <div id="editSafetyAttachmentList" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditSafetyModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditSafety()">保存修改</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 28-A. 1530 安全教育类型自定义管理弹窗 -->
+  <div class="modal-overlay" id="safetyTypeManageModal">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title">🏷️ 1530 安全教育类型自定义管理</div>
+        <button class="drawer-close-btn" onclick="window.closeSafetyTypeManageModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+        <div
+          style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 12px; font-size: 12.5px; color: #1e40af; line-height: 1.5;">
+          💡 <strong>安全教育类型支持自拟：</strong>您可自拟添加（如“防溺水专项教育”、“课间安全五分钟”、“春季传染病防控”、“消防演练培训”等），添加后将实时同步至新增留痕与台账分类中。
+        </div>
+        <div class="card"
+          style="padding: 10px 12px; margin-bottom: 12px; background: #f8fafc; border: 1.5px dashed #cbd5e1;">
+          <div style="font-weight: 700; font-size: 12.5px; color: #334155; margin-bottom: 6px;">➕ 添加新教育类型</div>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="newSafetyTypeNameInput" class="form-control" style="flex: 1;"
+              placeholder="输入类型名称，如：防溺水专项教育 / 交通路队五分钟" onkeydown="if(event.key==='Enter') window.saveNewSafetyType()">
+            <button class="btn btn-sm btn-primary" onclick="window.saveNewSafetyType()">确认添加</button>
+          </div>
+        </div>
+        <div style="font-weight: 700; font-size: 13px; color: #334155; margin-bottom: 8px;">📋 当前全部教育类型：</div>
+        <div id="safetyTypeManageList" style="display: flex; flex-direction: column; gap: 8px;">
+          <!-- 动态渲染各类型条目，支持实时改名、删除 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="window.closeSafetyTypeManageModal()">完成并返回</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 28-B. 安全教育留痕凭证与材料详情查看弹窗 (支持图片/视频/PPT/Word/PDF多格式预览与下载) -->
+  <div class="modal-overlay" id="viewSafetyMaterialModal">
+    <div class="modal-dialog" style="max-width: 820px;">
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between;">
+        <div class="modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <span>🛡️ 1530安全教育留痕凭证详情</span>
+          <span class="badge badge-success" id="viewMaterialTypeBadge">1530留痕</span>
+        </div>
+        <button class="drawer-close-btn" onclick="window.closeViewSafetyMaterialModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto; padding: 18px 20px;">
+        <!-- 顶部教育台账元信息摘要卡片 -->
+        <div class="card"
+          style="padding: 12px 16px; margin-bottom: 14px; background: #f8fafc; border: 1px solid #e2e8f0;">
+          <div
+            style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
+            <div style="font-size: 15px; font-weight: 800; color: #1e293b;" id="viewMaterialTopic"></div>
+            <div style="font-size: 12px; color: #64748b;">开展日期：<strong id="viewMaterialDate"
+                style="color: #1e293b;"></strong></div>
+          </div>
+          <div
+            style="font-size: 12.5px; color: #475569; line-height: 1.5; background: #fff; padding: 8px 12px; border-radius: 6px; border: 1px solid #f1f5f9; margin-bottom: 8px;"
+            id="viewMaterialContent"></div>
+          <div style="display: flex; gap: 14px; font-size: 12px; color: #64748b; flex-wrap: wrap;">
+            <span>形式：<strong id="viewMaterialMethod" style="color: #334155;"></strong></span>
+            <span>受教人数：<strong id="viewMaterialParticipants" style="color: #334155;"></strong></span>
+            <span>宣讲人：<strong id="viewMaterialTeacher" style="color: #334155;"></strong></span>
+          </div>
+        </div>
+
+        <!-- 凭证附件标题与数量 -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <div style="font-weight: 700; font-size: 14px; color: #1e293b; display: flex; align-items: center; gap: 6px;">
+            <span>📎 归档佐证附件台账</span>
+            <span class="badge badge-info" id="viewMaterialAttachmentCountBadge">0个文件</span>
+          </div>
+        </div>
+
+        <!-- 凭证附件展示容器 (按图片/视频/PPT/Word分门别类高保真渲染) -->
+        <div id="viewMaterialAttachmentsContainer" style="display: flex; flex-direction: column; gap: 14px;">
+          <!-- 动态填充各类凭证视图 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="window.closeViewSafetyMaterialModal()">关闭窗口</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 29. 添加/编辑班级自拟公约条款弹窗 -->
+  <div class="modal-overlay" id="editRuleModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title" id="ruleModalTitle">📜 维护班规班约条款</div>
+        <button class="drawer-close-btn" onclick="window.closeEditRuleModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editRuleIndex">
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="margin: 0; font-weight: 700;">公约分类板块 *</label>
+            <button type="button" class="btn btn-sm btn-secondary" style="padding: 1px 8px; font-size: 11.5px;"
+              onclick="window.openRuleCategoryManageModal()">⚙️ 管理分类板块</button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <select class="form-control" id="editRuleCategory" style="flex: 1;">
+              <!-- JS 动态填充分类列表 -->
+            </select>
+            <button type="button" class="btn btn-sm btn-primary" onclick="window.quickAddRuleCategoryPrompt()"
+              style="white-space: nowrap;">➕ 新增分类</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>公约具体条款要求 *</label>
+          <textarea class="form-control" id="editRuleContent" placeholder="如：预备铃响进教室，学习用品桌面放好，书本摆放整齐..."></textarea>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>达标奖励机制</label>
+            <input type="text" class="form-control" id="editRuleReward" value="量化+2分 / 获小红花一枚">
+          </div>
+          <div class="form-group">
+            <label>违约引导与处理</label>
+            <input type="text" class="form-control" id="editRulePenalty" value="个别提醒纠正，扣减量化1分">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditRuleModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditRule()">确认保存条款</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 30. 添加/编辑量化细则弹窗 -->
+  <div class="modal-overlay" id="editRewardFineModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title" id="rewardFineModalTitle">🏆 维护量化奖惩考核细则</div>
+        <button class="drawer-close-btn" onclick="window.closeEditRewardFineModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editRewardFineIndex">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>考核细则名称 *</label>
+            <input type="text" class="form-control" id="editRewardFineTitle" placeholder="如：早读主动领读">
+          </div>
+          <div class="form-group">
+            <label>奖惩性质</label>
+            <select class="form-control" id="editRewardFineType">
+              <option value="reward">➕ 奖励加分项</option>
+              <option value="penalty">➖ 违纪扣分项</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>变动分值 *</label>
+            <input type="number" class="form-control" id="editRewardFinePoints" value="2">
+          </div>
+          <div class="form-group">
+            <label>适用对象</label>
+            <select class="form-control" id="editRewardFineTarget">
+              <option value="个人">个人</option>
+              <option value="小组">所在小组全员</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditRewardFineModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditRewardFine()">确认保存细则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 31. 添加/编辑自定义报表模板弹窗 -->
+  <div class="modal-overlay" id="editReportTemplateModal">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div class="modal-title" id="reportTemplateModalTitle">📑 维护常用报表模板</div>
+        <button class="drawer-close-btn" onclick="window.closeEditReportTemplateModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editReportTemplateIndex">
+        <div class="form-group">
+          <label>报表模板名称 *</label>
+          <input type="text" class="form-control" id="editReportTemplateName" placeholder="如：学生体质健康达标统计表">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>更新/生成周期</label>
+            <input type="text" class="form-control" id="editReportTemplateCycle" placeholder="如：每学期一次 / 每月生成">
+          </div>
+          <div class="form-group">
+            <label>支持导出格式</label>
+            <select class="form-control" id="editReportTemplateFormat">
+              <option value="Excel">Excel (.xlsx)</option>
+              <option value="Excel / PDF">Excel / PDF</option>
+              <option value="Word / PDF">Word / PDF</option>
+              <option value="PDF">PDF</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>报表内容与说明要点</label>
+          <textarea class="form-control" id="editReportTemplateDesc" placeholder="简要说明此报表的用途、涵盖字段与汇报对象..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeEditReportTemplateModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitEditReportTemplate()">保存报表模板</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 32. 相片大图预览弹窗 -->
+  <div class="modal-overlay" id="photoPreviewModal" onclick="if(event.target===this) window.closePhotoPreviewModal()">
+    <div class="modal-dialog modal-lg"
+      style="text-align: center; max-width: 800px; background: transparent; box-shadow: none;">
+      <div style="position: relative; display: inline-block; max-width: 100%;">
+        <button class="drawer-close-btn"
+          style="position: absolute; right: 10px; top: 10px; z-index: 10; background: rgba(0,0,0,0.6); color: #fff; width: 34px; height: 34px; border-radius: 50%;"
+          onclick="window.closePhotoPreviewModal()">✕</button>
+        <div id="photoPreviewContent"
+          style="background: #fff; border-radius: var(--radius-lg); padding: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+          <!-- 动态渲染大图或卡片 -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 33. 小组与个性化成长标签管理中心弹窗 -->
+  <div class="modal-overlay" id="groupTagManageModal">
+    <div class="modal-dialog modal-lg" style="max-width: 780px;">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ 小组与个性化成长标签管理中心</div>
+        <button class="drawer-close-btn" onclick="window.closeGroupTagManageModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <div class="tab-pills" id="groupTagSubTabs" style="margin-bottom: 14px;">
+          <div class="tab-pill active" data-tab="groups" onclick="window.switchGroupTagTab('groups', this)">👥
+            小组管理与自定义增删</div>
+          <div class="tab-pill" data-tab="tags" onclick="window.switchGroupTagTab('tags', this)">🏷️ 标签库管理与多选池</div>
+        </div>
+
+        <!-- 小组管理 Tab -->
+        <div id="gtmGroupsTab">
+          <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+            <input type="text" class="form-control" id="newGroupNameInput" placeholder="输入新小组名称 (如：第7组、卓越组、晨星组)...">
+            <button class="btn btn-primary" onclick="window.submitAddNewGroup()" style="white-space: nowrap;">➕
+              添加新小组</button>
+          </div>
+          <div style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px;">
+            💡 当前班级已定义的小组清单（支持增删、✏️自定义修改/重命名，删除后原组内学生将自动归入保留组）：
+          </div>
+          <div id="gtmGroupsListContainer"
+            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px;">
+            <!-- JS 动态渲染小组卡片 -->
+          </div>
+        </div>
+
+        <!-- 标签管理 Tab -->
+        <div id="gtmTagsTab" style="display: none;">
+          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap;">
+            <input type="text" class="form-control" id="newTagNameInput" placeholder="输入新成长标签名称 (如：阅读之星、劳动模范、善于思考)..." style="flex: 1; min-width: 240px;">
+            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #334155; user-select: none; cursor: pointer; white-space: nowrap; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; border: 1px solid #cbd5e1;">
+              <input type="checkbox" id="newTagStackableCheckbox" checked style="cursor: pointer;" onchange="const w = document.getElementById('newTagGoldThresholdWrapper'); if(w) w.style.display = this.checked ? 'inline-flex' : 'none';">
+              <span>允许数量累加增减</span>
+            </label>
+            <div id="newTagGoldThresholdWrapper" style="display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; padding: 5px 10px; border-radius: 6px; white-space: nowrap;">
+              <span>⭐ 达到</span>
+              <input type="number" id="newTagGoldThresholdInput" min="1" max="99" value="3" style="width: 48px; height: 26px; text-align: center; font-weight: 700; border: 1px solid #f59e0b; border-radius: 4px; color: #b45309;" title="达到此数量时字体与徽章变为高光金黄色，未达到时为普通蓝色">
+              <span>个变金黄色</span>
+            </div>
+            <button class="btn btn-primary" onclick="window.submitAddNewTag()" style="white-space: nowrap;">➕ 添加新标签</button>
+          </div>
+          <div style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px;">
+            💡 当前班级成长标签库（支持增删、点击标签小标可随时切换是否允许增减累加，同一学生在档案编辑中支持数量步进增减）：
+          </div>
+          <div id="gtmTagsListContainer"
+            style="display: flex; flex-wrap: wrap; gap: 8px; padding: 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-md);">
+            <!-- JS 动态渲染标签徽章与删除按钮 -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="window.closeGroupTagManageModal()">完成并关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 33-B. 学生档案卡片信息显影与字号批量设置中心弹窗 -->
+  <div class="modal-overlay" id="cardDisplayConfigModal">
+    <div class="modal-dialog modal-lg" style="max-width: 880px;">
+      <div class="modal-header">
+        <div class="modal-title">🎛️ 学生档案卡片信息显影与字号调节中心</div>
+        <button class="drawer-close-btn" onclick="window.closeCardDisplayConfigModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 78vh; overflow-y: auto;">
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px 14px; font-size: 12.5px; color: #1e40af; margin-bottom: 16px;">
+          💡 <strong>批量设置提示</strong>：在此设置学生卡片中各项信息的显隐（显影）状态与字号大小。点击底部“确认并批量应用至全班”，所有学生档案卡片将即时统一生效并自动持久化！其中<strong>学生姓名固定展示</strong>不可隐藏。
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; align-items: start;">
+          <!-- 左侧：字段显隐开关与字号微调面板 -->
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div style="font-weight: 700; font-size: 14px; color: #1e293b; display: flex; justify-content: space-between; align-items: center;">
+              <span>📋 信息项显影开关与字号微调</span>
+              <button class="btn btn-sm btn-secondary" onclick="window.resetCardDisplayConfigToDefault()" style="font-size: 11.5px; padding: 2px 8px;">🔄 恢复默认标准</button>
+            </div>
+
+            <!-- 控制卡片列表 -->
+            <div style="display: flex; flex-direction: column; gap: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-md); padding: 12px 14px;">
+              
+              <!-- 姓名 (固定必显) -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <input type="checkbox" checked disabled title="学生姓名固定必须展示，不可隐藏">
+                  <strong style="font-size: 13px; color: #1e293b;">学生姓名</strong>
+                  <span class="badge badge-success" style="font-size: 10px;">固定必显</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="14" max="22" step="1" id="cfgFontSize_name" value="16" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_name" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">16px</span>
+                </div>
+              </div>
+
+              <!-- 学生学号 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_studentId" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">🆔 学生学号</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="10" max="16" step="0.5" id="cfgFontSize_studentId" value="12" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_studentId" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">12px</span>
+                </div>
+              </div>
+
+              <!-- 所在小组 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_group" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">👥 所在小组</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="10" max="16" step="0.5" id="cfgFontSize_group" value="12" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_group" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">12px</span>
+                </div>
+              </div>
+
+              <!-- 身份证号 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_idCard" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">身份证号码 (脱敏掩码)</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="9" max="15" step="0.5" id="cfgFontSize_idCard" value="11" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_idCard" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">11px</span>
+                </div>
+              </div>
+
+              <!-- 户籍地 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_hukou" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">🏡 户口所在地 / 户籍地址</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="10" max="16" step="0.5" id="cfgFontSize_hukou" value="12" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_hukou" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">12px</span>
+                </div>
+              </div>
+
+              <!-- 现住址 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_address" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">📍 现居住常住地址</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="10" max="16" step="0.5" id="cfgFontSize_address" value="12" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_address" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">12px</span>
+                </div>
+              </div>
+
+              <!-- 监护人 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_guardian" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">监护人家长与联系电话</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="10" max="16" step="0.5" id="cfgFontSize_guardian" value="12" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_guardian" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">12px</span>
+                </div>
+              </div>
+
+              <!-- 关爱帮扶 / 留守儿童 -->
+              <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px dashed #e2e8f0; padding-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_careTags" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">🌟 留守儿童 / 困难帮扶关爱标签</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="9" max="14" step="0.5" id="cfgFontSize_careTags" value="10.5" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_careTags" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">10.5px</span>
+                </div>
+              </div>
+
+              <!-- 成长个性标签 -->
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_growthTags" checked onchange="window.previewCardDisplayConfig()">
+                  <span style="font-size: 13px; color: #334155; font-weight: 600;">🏷️ 成长个性标签 (如文明之星*2)</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span style="font-size: 11.5px; color: var(--text-muted);">字号:</span>
+                  <input type="range" min="9" max="14" step="0.5" id="cfgFontSize_growthTags" value="10.5" oninput="window.previewCardDisplayConfig()" style="width: 80px;">
+                  <span id="cfgFontSizeVal_growthTags" style="font-size: 12px; font-weight: 700; width: 32px; color: #2563eb;">10.5px</span>
+                </div>
+              </div>
+
+              <!-- 更多顶部特征项 -->
+              <div style="display: flex; gap: 16px; margin-top: 6px; padding-top: 8px; border-top: 1px dashed #e2e8f0; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #475569; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_avatar" checked onchange="window.previewCardDisplayConfig()">
+                  <span>学生头像照片</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #475569; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_nation" checked onchange="window.previewCardDisplayConfig()">
+                  <span>民族成分徽章</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #475569; cursor: pointer;">
+                  <input type="checkbox" id="cfgVisible_role" checked onchange="window.previewCardDisplayConfig()">
+                  <span>班干部职务标签</span>
+                </label>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 右侧：实时卡片预览区域 -->
+          <div>
+            <div style="font-weight: 700; font-size: 14px; color: #1e293b; margin-bottom: 10px;">
+              👁️ 实时效果预览 (根据左侧调节毫秒级联动)
+            </div>
+            <div id="cardDisplayPreviewContainer" style="max-width: 340px; margin: 0 auto;">
+              <!-- JS 动态渲染预览卡片 -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 12.5px; color: #059669; font-weight: 600;">✨ 点击保存后将立即批量生效至全班所有学生卡片</span>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-secondary" onclick="window.closeCardDisplayConfigModal()">取消</button>
+          <button class="btn btn-primary" onclick="window.applyAndSaveCardDisplayConfig()" style="background: linear-gradient(135deg, #0284c7, #0369a1); font-weight: 700;">
+            🚀 确认并批量应用至全班
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 34. 新增自拟班规条约套系模板弹窗 -->
+  <div class="modal-overlay" id="addRuleTemplateModal">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">📜 新增自拟班规条约套系模板</div>
+        <button class="drawer-close-btn" onclick="window.closeAddRuleTemplateModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>班规条约套系名称 *</label>
+            <input type="text" class="form-control" id="newRuleTemplateName" placeholder="如：阳光班级自主发展公约">
+          </div>
+          <div class="form-group">
+            <label>建议适用学段</label>
+            <input type="text" class="form-control" id="newRuleTemplateLevel" placeholder="如：小学中高年级 / 全学段适用"
+              value="小学部适用">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>公约理念与实施说明要点</label>
+          <input type="text" class="form-control" id="newRuleTemplateDesc" placeholder="如：倡导学生自主管理与同伴互助，培养良好行为与学习习惯...">
+        </div>
+        <div class="form-group">
+          <label>初始核心条款条目 (每行一条规范)</label>
+          <textarea class="form-control" id="newRuleTemplateClauses" style="min-height: 120px;"
+            placeholder="早读书声琅琅，不迟到早退&#10;课堂积极思辨发言，桌椅排列整齐&#10;课间文明游戏，走廊不追逐打闹&#10;认真按时完成各科作业，卷面整洁"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeAddRuleTemplateModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitAddRuleTemplate()">确认创建条约模板</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 35. 班规公约分类板块增删管理弹窗 -->
+  <div class="modal-overlay" id="ruleCategoryManageModal">
+    <div class="modal-dialog" style="max-width: 540px;">
+      <div class="modal-header">
+        <div class="modal-title">⚙️ 班规公约分类板块管理中心</div>
+        <button class="drawer-close-btn" onclick="window.closeRuleCategoryManageModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="display: flex; gap: 8px; margin-bottom: 14px;">
+          <input type="text" class="form-control" id="newRuleCategoryInput" placeholder="输入新分类板块名称 (如：大课间操与跑操、午休纪律)...">
+          <button class="btn btn-primary" onclick="window.submitAddNewRuleCategory()" style="white-space: nowrap;">➕
+            添加新板块</button>
+        </div>
+        <div style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 8px;">
+          💡 当前支持的班规条款分类板块清单（支持随时添加与删除）：
+        </div>
+        <div id="ruleCategoriesListContainer"
+          style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+          <!-- JS 动态渲染各分类板块及条款数与删除按钮 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="window.closeRuleCategoryManageModal()">完成并关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 36. 班级任课老师账号协同管理弹窗 (由班主任维护) -->
+  <div class="modal-overlay" id="subjectTeachersModal">
+    <div class="modal-dialog modal-lg" style="max-width: 820px;">
+      <div class="modal-header">
+        <div class="modal-title">👩‍🏫 班级任课老师团队与账号协同管理</div>
+        <button class="drawer-close-btn" onclick="window.closeSubjectTeachersModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto;">
+        <div
+          style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #1e40af; line-height: 1.5;">
+          💡
+          <strong>班主任协同指南：</strong>您可以在此为当前班级添加<strong>语文、数学、英语、科学、体育等任课老师</strong>账号与密码。任课老师可在局域网任意电脑登录本工作台，协同布置批改作业、录入各科测验成绩与给学生记录量化积分。
+        </div>
+
+        <div class="card" style="padding: 14px; margin-bottom: 16px; background: #f8fafc; border: 1px solid #e2e8f0;">
+          <h4 style="margin-bottom: 10px; font-size: 14px; color: #1e293b;">➕ 添加/编辑任课老师账号</h4>
+          <input type="hidden" id="editTeacherId">
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>任课老师姓名 *</label>
+              <input type="text" class="form-control" id="newTeacherName" placeholder="如：王老师">
+            </div>
+            <div class="form-group">
+              <label>所教负责学科 *</label>
+              <input type="text" class="form-control" id="newTeacherSubject" placeholder="如：数学 / 英语 / 科学">
+            </div>
+            <div class="form-group">
+              <label>登录用户名 (账号) *</label>
+              <input type="text" class="form-control" id="newTeacherUsername" placeholder="如：math_wang">
+            </div>
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>登录密码 *</label>
+              <input type="text" class="form-control" id="newTeacherPassword" placeholder="如：123456" value="123456">
+            </div>
+            <div class="form-group">
+              <label>联系电话</label>
+              <input type="text" class="form-control" id="newTeacherPhone" placeholder="如：13800000001">
+            </div>
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-sm btn-secondary" onclick="window.resetSubjectTeacherForm()">清空重填</button>
+            <button class="btn btn-sm btn-primary" onclick="window.submitSaveSubjectTeacher()">💾 确认保存任课老师</button>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-weight: 700; color: #334155; font-size: 13.5px; margin-bottom: 8px;">📋 当前班级任课老师账号列表：</div>
+          <div id="subjectTeachersListContainer"
+            style="display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px;">
+            <!-- JS 动态渲染任课老师卡片 -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="window.closeSubjectTeachersModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 37. 教师账号登录弹窗 (支持首次开门强制登录与账号切换) -->
+  <div class="modal-overlay" id="userLoginModal">
+    <div class="modal-dialog" style="max-width: 440px;">
+      <div class="modal-header">
+        <div class="modal-title" id="loginModalTitle">🔐 班主任工作台 · 教师登录</div>
+        <button class="drawer-close-btn" id="loginModalCloseBtn" onclick="window.closeUserLoginModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="tab-pills" style="margin-bottom: 16px; justify-content: center;">
+          <div class="tab-pill active" id="loginTabHomeroom" onclick="window.setLoginRoleTab('homeroom')">👨‍🏫 班主任登录
+          </div>
+          <div class="tab-pill" id="loginTabSubject" onclick="window.setLoginRoleTab('subject')">👩‍🏫 任课老师登录</div>
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label>登录用户名 (账号) *</label>
+          <input type="text" class="form-control" id="loginUsernameInput" placeholder="输入用户名" value="teacher_li"
+            onkeydown="if(event.key==='Enter') window.submitUserLogin()">
+        </div>
+        <div class="form-group" style="margin-bottom: 14px;">
+          <label>登录密码 *</label>
+          <input type="password" class="form-control" id="loginPasswordInput" placeholder="输入密码" value=""
+            onkeydown="if(event.key==='Enter') window.submitUserLogin()">
+        </div>
+        <div
+          style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5; background: #f8fafc; padding: 8px 12px; border-radius: 6px; border: 1px dashed #cbd5e1;">
+          <div id="loginRoleHint">💡 <strong>班主任体验账号</strong>: <code>teacher_li</code> / 密码: <code>123</code> <span
+              style="color: #ea580c;">(仅限示范默认模板体验)</span></div>
+          <div style="color: #64748b; margin-top: 4px;">💡 <strong>正式教师账号</strong>: 请输入分配的手机号/账号 (如
+            <code>13800000000</code> / 密码: <code>123</code>)</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="loginModalCancelBtn" onclick="window.closeUserLoginModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.submitUserLogin()" style="flex: 1;">确认登录进入工作台</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 38. 多班级切换弹窗 -->
+  <div class="modal-overlay" id="classSwitcherModal">
+    <div class="modal-dialog" style="max-width: 520px;">
+      <div class="modal-header">
+        <div class="modal-title">🏫 班级集群切换 (各班级数据独立隔离)</div>
+        <button class="drawer-close-btn" onclick="window.closeClassSwitcherModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="classSwitcherModalTip"
+          style="font-size: 12.5px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.6;">
+          💡 当前后台管理中心已注册的独立班级列表（数据与管理页面完全同步，各班级100%物理隔离）：
+        </div>
+        <div id="classSwitcherListContainer"
+          style="display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;">
+          <!-- JS 动态渲染班级列表 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeClassSwitcherModal()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 39. 老师任教多班级选择弹窗 -->
+  <div class="modal-overlay" id="selectTaughtClassModal" style="z-index: 10050;">
+    <div class="modal-dialog" style="max-width: 500px;">
+      <div class="modal-header">
+        <div class="modal-title">🏫 选择本次执教工作班级</div>
+        <button class="drawer-close-btn" onclick="window.cancelSelectTaughtClass()">✕</button>
+      </div>
+      <div class="modal-body">
+        <div style="font-size: 13px; color: #475569; margin-bottom: 14px; line-height: 1.6;">
+          <span id="selectTaughtClassTeacherName" style="font-weight: 700; color: #1e293b;"></span>
+          老师，检测到您当前同时任教以下多个班级，请选择您本次要进入开展班务工作的班级：
+        </div>
+        <div id="selectTaughtClassList"
+          style="display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto;">
+          <!-- 动态渲染该老师任教的班级列表 -->
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="window.cancelSelectTaughtClass()">返回重新登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 40. 学生档案真实头像拖拽调整居中裁剪弹窗 -->
+  <div class="modal-overlay" id="studentAvatarCropModal" style="z-index: 10060;">
+    <div class="modal-dialog modal-lg" style="max-width: 680px;">
+      <div class="modal-header">
+        <div class="modal-title">📷 调整学生真实档案头像 (拖拽置于正中圆心)</div>
+        <button class="drawer-close-btn" onclick="window.closeStudentAvatarCropModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 0;">
+        <div class="avatar-crop-body">
+          <!-- 左侧：交互式正圆取景视口 -->
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 12px;">
+            <div class="avatar-crop-viewport" id="avatarCropViewport" title="按住鼠标左键自由拖动平移，滚动滑轮可缩放">
+              <div class="avatar-crop-stage" id="avatarCropStage">
+                <img id="avatarCropImg" src="" alt="学生照片待裁剪">
+              </div>
+              <div class="avatar-crop-mask-circle"></div>
+              <div class="avatar-crop-crosshair"></div>
+              <div class="avatar-crop-center-dot"></div>
+            </div>
+
+            <!-- 取景视口下方微调工具条 -->
+            <div style="display: flex; align-items: center; gap: 8px; width: 340px; justify-content: space-between;">
+              <button class="btn btn-sm btn-secondary" style="padding: 3px 8px;" onclick="window.stepAvatarZoom(-0.1)"
+                title="缩小">🔍-</button>
+              <div style="display: flex; align-items: center; gap: 6px; flex: 1;">
+                <input type="range" id="avatarCropZoomRange" min="0.5" max="3" step="0.02" value="1" style="flex: 1;"
+                  oninput="window.onAvatarZoomSliderChange(this.value)">
+                <span id="avatarCropZoomLabel"
+                  style="font-size: 11px; font-weight: 700; color: #475569; width: 38px; text-align: right;">100%</span>
+              </div>
+              <button class="btn btn-sm btn-secondary" style="padding: 3px 8px;" onclick="window.stepAvatarZoom(0.1)"
+                title="放大">🔍+</button>
+              <button class="btn btn-sm btn-secondary" style="padding: 3px 8px;"
+                onclick="window.rotateAvatarCropImage()" title="顺时针旋转90度">🔄 旋转</button>
+              <button class="btn btn-sm btn-secondary" style="padding: 3px 8px;"
+                onclick="window.resetAvatarCropPosition()" title="复位居中">🎯 复位</button>
+            </div>
+          </div>
+
+          <!-- 右侧：多业务场景实时圆形预览面板 -->
+          <div class="avatar-crop-side-panel">
+            <div
+              style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: var(--radius-md); padding: 10px 12px; font-size: 12px; color: #1e40af; line-height: 1.5;">
+              💡 <strong>操作指南</strong>：<br>
+              1. 鼠标按住照片直接<strong>拖拽平移</strong>，将学生面部五官置于圆形虚线与正中准星（中心蓝点）位置；<br>
+              2. 滑动鼠标滚轮或下方滑块缩放；<br>
+              3. 观察下方多尺寸实时预览，满意后点击保存。
+            </div>
+
+            <div class="avatar-crop-previews-group">
+              <div style="font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 10px;">🌟 实时显示效果预览</div>
+
+              <div class="avatar-preview-item">
+                <div class="avatar-preview-circle" style="width: 80px; height: 80px;">
+                  <img id="avatarPreviewLarge" src="">
+                </div>
+                <div>
+                  <div style="font-size: 13px; font-weight: 600; color: #1e293b;">档案详情抽屉</div>
+                  <div style="font-size: 11px; color: var(--text-muted);">80×80 正圆居中</div>
+                </div>
+              </div>
+
+              <div class="avatar-preview-item">
+                <div class="avatar-preview-circle" style="width: 58px; height: 58px;">
+                  <img id="avatarPreviewMedium" src="">
+                </div>
+                <div>
+                  <div style="font-size: 12px; font-weight: 600; color: #1e293b;">学生档案卡片</div>
+                  <div style="font-size: 11px; color: var(--text-muted);">58×58 卡片视图</div>
+                </div>
+              </div>
+
+              <div class="avatar-preview-item">
+                <div class="avatar-preview-circle" style="width: 38px; height: 38px;">
+                  <img id="avatarPreviewSmall" src="">
+                </div>
+                <div>
+                  <div style="font-size: 11.5px; font-weight: 600; color: #1e293b;">座位表 / 列表</div>
+                  <div style="font-size: 10.5px; color: var(--text-muted);">38×38 课桌视图</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="window.closeStudentAvatarCropModal()">取消</button>
+        <button class="btn btn-primary" onclick="window.confirmStudentAvatarCrop()">✅ 确认并保存学生头像</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 36. 班级今日寿星 · 生日祝福与表彰弹窗 -->
+  <div class="modal-overlay" id="birthdayCelebrationModal" onclick="if(event.target===this) window.closeBirthdayCelebrationModal()">
+    <div class="modal-dialog modal-lg" style="max-width: 680px; border-radius: var(--radius-xl); overflow: hidden;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #fff;">
+        <div class="modal-title" style="color: #fff; font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+          <span>🎂 今日班级小寿星 · 集体生日祝福</span>
+          <span class="badge" style="background: rgba(255,255,255,0.25); color: #fff; font-size: 11.5px;" id="bcmStudentCountBadge">共 0 位学生</span>
+        </div>
+        <button class="drawer-close-btn" style="color: #fff;" onclick="window.closeBirthdayCelebrationModal()">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto; padding: 18px 20px;">
+        <!-- 顶部喜庆横幅 -->
+        <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border: 1.5px dashed #fcd34d; border-radius: var(--radius-lg); padding: 14px 18px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="font-size: 15px; font-weight: 800; color: #92400e; margin-bottom: 3px;">🎉 祝今日寿星同学：健康快乐、茁壮成长、学业进步！</div>
+            <div style="font-size: 12.5px; color: #b45309;" id="bcmDateSubtext">
+              📅 今日公历：2026年9月6日 星期日 ｜ 🎋 对应中国通用农历：丙午马年 七月廿五
+            </div>
+          </div>
+          <div style="font-size: 34px;">🎈</div>
+        </div>
+
+        <!-- 寿星学生卡片列表容器 -->
+        <div id="bcmStudentsListContainer" style="display: flex; flex-direction: column; gap: 12px;">
+          <!-- JS 动态注入寿星卡片 -->
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.closeBirthdayCelebrationModal()">完成并关闭</button>
+        <button class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; font-weight: 700;" onclick="window.sendBatchBirthdayWishes()">💌 一键送出全班集体祝福卡片</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 19.0 智慧黑板作业完成状态大屏（校园数字驾驶舱） -->
+  <div class="smartboard-overlay" id="homeworkSmartBoardModal">
+    <div class="smartboard-frame" id="smartboardFrame">
+      <!-- 顶部黑板横幅与数字驾驶舱 HUD -->
+      <div class="smartboard-header">
+        <div class="smartboard-title-group">
+          <div class="smartboard-main-title">
+            <span>✨ 智慧黑板打卡看板</span>
+            <span class="smartboard-task-badge" id="smartboardSubjectBadge">语文</span>
+            <span id="smartboardHomeworkTitle" style="font-size: 20px;">背诵古诗</span>
+          </div>
+          <div class="smartboard-task-desc" id="smartboardHomeworkDesc">静夜思</div>
+        </div>
+
+        <!-- 驾驶舱核心指标 HUD -->
+        <div class="smartboard-hud-stats">
+          <div class="smartboard-hud-pill unsubmitted">
+            <span>⏳ 待完成:</span>
+            <strong id="smartboardUnsubmittedCount" style="font-size: 15px;">52</strong>
+            <span>人</span>
+          </div>
+
+          <div class="smartboard-hud-pill submitted">
+            <span>✅ 已完成:</span>
+            <strong id="smartboardSubmittedCount" style="font-size: 15px;">1</strong>
+            <span>人</span>
+          </div>
+
+          <div class="smartboard-progress-box">
+            <div class="smartboard-progress-label">
+              <span>完成率</span>
+              <strong id="smartboardProgressPercent">1.9%</strong>
+            </div>
+            <div class="smartboard-progress-track">
+              <div class="smartboard-progress-fill" id="smartboardProgressBar" style="width: 1.9%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 快捷操作区 -->
+        <div class="smartboard-actions">
+          <button class="smartboard-btn" id="smartboardSoundToggleBtn" onclick="window.toggleSmartBoardSound()" title="开启/静音打卡音效">
+            🔊 音效开
+          </button>
+          <button class="smartboard-btn primary" onclick="window.markAllSmartBoardSubmit(true)">
+            ✨ 全员完成
+          </button>
+          <button class="smartboard-btn" onclick="window.markAllSmartBoardSubmit(false)">
+            🔄 全部重置
+          </button>
+          <button class="smartboard-btn" onclick="window.toggleSmartBoardFullscreen()" title="切换全屏黑板沉浸模式">
+            🖥️ 全屏
+          </button>
+          <button class="smartboard-btn close-btn" onclick="window.closeHomeworkSmartBoard()" title="退出智慧黑板">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- 主体区域：左白板 (今日待完成) + 中间自律立柱与卡通教师 + 右白板 (已完成) -->
+      <div class="smartboard-body">
+        <!-- 左侧白板：今日待完成 -->
+        <div class="smartboard-panel pending-panel">
+          <div class="smartboard-panel-header">
+            <div class="smartboard-panel-title pending">
+              <span>今日待完成</span>
+              <span class="smartboard-panel-counter pending" id="smartboardPendingBadge">52人</span>
+            </div>
+            <span style="font-size: 11.5px; color: #94a3b8;">👆 点击学生头像卡片自动飞跃至右侧完成</span>
+          </div>
+
+          <!-- 搜索过滤与小组排布切换工具条 -->
+          <div class="smartboard-panel-toolbar">
+            <input type="text" class="smartboard-search-input" id="smartboardPendingSearch" 
+                   placeholder="🔍 快速搜索学生姓名..." oninput="window.filterSmartBoardStudents()">
+            <div class="smartboard-layout-selector" id="smartboardLayoutSelector">
+              <button class="smartboard-layout-btn active" data-layout="horizontal" onclick="window.setSmartBoardLayout('horizontal')" title="小组横排（逐行流）">☰ 组横排</button>
+              <button class="smartboard-layout-btn" data-layout="vertical" onclick="window.setSmartBoardLayout('vertical')" title="小组竖排（分栏列）">☷ 组竖排</button>
+            </div>
+          </div>
+
+          <!-- 待完成小组卡片墙 -->
+          <div class="smartboard-group-wall layout-horizontal" id="smartboardPendingList">
+            <!-- 动态按小组装配待完成学生头像卡片 -->
+          </div>
+        </div>
+
+        <!-- 中央自律励志立柱与卡通教师 -->
+        <div class="smartboard-center-pillar">
+          <div class="smartboard-quote-text" id="smartboardQuoteText">
+            在浮躁的时代，只有自律的人，才有可能脱颖而出，成就大事。
+          </div>
+          <div class="smartboard-teacher-mascot" id="smartboardTeacherMascot">
+            <!-- 矢量卡通助威教师 -->
+          </div>
+        </div>
+
+        <!-- 右侧白板：已完成 -->
+        <div class="smartboard-panel completed-panel">
+          <div class="smartboard-panel-header">
+            <div class="smartboard-panel-title completed">
+              <span>已完成</span>
+              <span class="smartboard-panel-counter completed" id="smartboardCompletedBadge">1人</span>
+            </div>
+            <span style="font-size: 11.5px; color: #10b981;">🎉 任务达标 · 点击可撤回至待完成</span>
+          </div>
+
+          <!-- 搜索过滤条 -->
+          <div class="smartboard-panel-toolbar">
+            <input type="text" class="smartboard-search-input" id="smartboardCompletedSearch" 
+                   placeholder="🔍 快速搜索学生姓名..." oninput="window.filterSmartBoardStudents()">
+          </div>
+
+          <!-- 已完成小组卡片墙 -->
+          <div class="smartboard-group-wall layout-horizontal" id="smartboardCompletedList">
+            <!-- 动态按小组装配已完成学生头像卡片 -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 20.0 智能补充资料导入分析预览弹窗 (支持横向分组表、纵向分组表、多字段属性二维表等不固定格式自适应识别) -->
+  <div class="modal-overlay" id="supplementaryImportModal" style="z-index: 120;">
+    <div class="modal-dialog modal-lg" style="width: 920px; max-width: 96vw; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #f0f9ff, #e0f2fe); border-bottom: 1px solid #bae6fd; padding: 14px 22px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <div>
+            <div class="modal-title" style="color: #0369a1; font-size: 16px; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+              <span>📥 导入补充学生资料</span>
+              <span class="badge" style="background: #0284c7; color: #fff; font-size: 11px;">多格式智能自适应解析</span>
+            </div>
+            <div style="font-size: 12px; color: #64748b; margin-top: 3px;">
+              支持横向分组表（如《四年级7班各小组成员.xlsx》）、纵向分组分栏表、学生多维信息补充表等，自动识别解析内容，不限制表格格式
+            </div>
+          </div>
+          <button class="drawer-close-btn" onclick="window.closeSupplementaryImportModal()">✕</button>
+        </div>
+      </div>
+
+      <div class="modal-body" style="padding: 18px 22px; overflow-y: auto; max-height: calc(90vh - 135px);">
+        <!-- 上传引导拖拽区 -->
+        <div id="suppUploadDropzone" style="border: 2px dashed #38bdf8; border-radius: 12px; background: #f8fafc; padding: 22px 16px; text-align: center; cursor: pointer; transition: all 0.2s;"
+             onclick="document.getElementById('suppExcelFileInput').click()"
+             ondragover="event.preventDefault(); this.style.background='#f0f9ff';"
+             ondragleave="this.style.background='#f8fafc';"
+             ondrop="window.handleSupplementaryFileDrop(event)">
+          <div style="font-size: 32px; margin-bottom: 6px;">📑</div>
+          <div style="font-size: 14.5px; font-weight: 700; color: #0f172a; margin-bottom: 4px;">
+            点击选择或将 Excel 表格文件拖拽至此处
+          </div>
+          <div style="font-size: 12px; color: #64748b; margin-bottom: 10px;">
+            支持 .xlsx / .xls / .csv 格式，无需修改原始表格结构，算法将自动侦测学生名单与所含字段
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+            <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 11px;">✅ 横向小组分工表 (如各小组成员表)</span>
+            <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 11px;">✅ 纵向分组分栏表</span>
+            <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 11px;">✅ 任意多属性信息扩展表</span>
+            <span class="badge" style="background: #e0f2fe; color: #0369a1; font-size: 11px;">✅ 班干部/职务/电话单项映射</span>
+          </div>
+          <input type="file" id="suppExcelFileInput" accept=".xlsx,.xls,.csv" style="display: none;" onchange="window.handleSupplementaryFileSelect(event)">
+        </div>
+
+        <!-- 智能识别分析 HUD 状态卡 (解析后动态显示) -->
+        <div id="suppAnalysisHud" style="display: none; margin-top: 14px;">
+          <!-- 动态渲染分析结论指标 -->
+        </div>
+
+        <!-- 逐人比对明细预览区 (解析后动态显示) -->
+        <div id="suppDiffSection" style="display: none; margin-top: 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+            <div style="font-size: 13.5px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px;">
+              <span>🔍 字段变更与对齐比对清单</span>
+              <span id="suppMatchSummaryBadge" class="badge" style="background: #dcfce7; color: #15803d; font-size: 11.5px;">--</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 12px;">
+              <label style="display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color: #475569;">
+                <input type="checkbox" id="suppFilterOnlyChanges" onchange="window.filterSupplementaryDiffTable()"> 仅看有变更的学生
+              </label>
+            </div>
+          </div>
+
+          <!-- 比对明细表格容器 -->
+          <div id="suppDiffTableWrapper" style="max-height: 280px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff;">
+            <!-- JS 动态注入逐条比对行 -->
+          </div>
+
+          <!-- 更新策略微调项 -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px; margin-top: 12px; font-size: 12.5px; color: #334155;">
+            <div style="font-weight: 700; color: #0f172a; margin-bottom: 6px;">⚙️ 导入合并安全策略：</div>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="suppOptSafeMerge" checked disabled>
+                <span><strong>增量非破坏式更新</strong>：仅补齐或更新表格中提供的新数据，严格保护已有成绩、考勤、健康档案及头像照不被冲刷</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="suppOptAutoExpandGroups" checked>
+                <span><strong>自动扩展班级小组库</strong>：若表格出现第7组、第8组等新分组，自动在系统小组列表中扩增相应分组</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                <input type="checkbox" id="suppOptCreateNewStudents">
+                <span><strong>自动纳入新生建档</strong>：若表格中含有尚未在当前班级建档的新学生姓名，自动作为新学生入班</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 12px 22px; display: flex; justify-content: space-between; align-items: center;">
+        <div id="suppFooterStatus" style="font-size: 12px; color: #64748b;">
+          💡 请先上传需要补充更新的 Excel 表格
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <button class="btn btn-secondary" onclick="window.closeSupplementaryImportModal()">取消</button>
+          <button class="btn btn-primary" id="suppConfirmBtn" disabled onclick="window.confirmApplySupplementaryUpdate()"
+                  style="background: linear-gradient(135deg, #0284c7, #0369a1); border: none; font-weight: 700;">
+            🚀 确认执行补充更新
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示容器 -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- 脚本加载 (携带版本时间戳杜绝浏览器强缓存) -->
+  <script src="js/lib/xlsx.full.min.js?v=20260907_v8"></script>
+  <script src="js/lib/chart.umd.min.js?v=20260907_v8"></script>
+  <script src="js/lunar.js?v=20260906_v1"></script>
+  <script src="js/data.js?v=20260907_v8"></script>
+  <script src="js/store.js?v=20260911_v2"></script>
+  <script src="js/views/dashboard.js?v=20260907_v8"></script>
+  <script src="js/views/tasks.js?v=20260907_v8"></script>
+  <script src="js/views/students.js?v=20260911_v2"></script>
+  <script src="js/views/attendance.js?v=20260907_v8"></script>
+  <script src="js/views/schedule.js?v=20260907_v8"></script>
+  <script src="js/views/homework.js?v=20260911_v9"></script>
+  <script src="js/views/exams.js?v=20260907_v8"></script>
+  <script src="js/views/growth.js?v=20260907_v10"></script>
+  <script src="js/views/communication.js?v=20260907_v8"></script>
+  <script src="js/views/safety.js?v=20260907_v8"></script>
+  <script src="js/views/rules.js?v=20260907_v8"></script>
+  <script src="js/views/score.js?v=20260907_v8"></script>
+  <script src="js/views/pets.js?v=20260907_v8"></script>
+  <script src="js/views/activities.js?v=20260907_v8"></script>
+  <script src="js/views/stats.js?v=20260907_v8"></script>
+  <script src="js/views/datamgmt.js?v=20260907_v10"></script>
+  <script src="js/app.js?v=20260911_v11"></script>
+
+  <script>
+    // 强制实时同步顶部系统时间与定时刷新器 (每30秒动态校准一次系统时间)
+    (function () {
+      function syncSystemClock() {
+        if (window.updateTopbarInfo) {
+          window.updateTopbarInfo();
+        } else if (window.getCurrentDateInfo) {
+          var el = document.getElementById("topbarDateText");
+          if (el) el.innerText = window.getCurrentDateInfo().displayFull;
+        }
+      }
+      syncSystemClock();
+      setInterval(syncSystemClock, 30000);
+    })();
+  </script>
+</body>
+
+</html>

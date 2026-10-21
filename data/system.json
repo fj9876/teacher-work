@@ -1,0 +1,64 @@
+{
+  "admin": {
+    "username": "admin",
+    "password": "admin",
+    "name": "超级管理员"
+  },
+  "demoClass": {
+    "id": "class_demo_template",
+    "name": "【示范体验】班级默认模板",
+    "grade": "小学四年级",
+    "homeroomTeacher": "体验教师",
+    "studentCount": 45,
+    "isTemplate": true
+  },
+  "classes": [
+    {
+      "id": "class_demo_template",
+      "name": "【示范体验】班级默认模板",
+      "grade": "小学四年级",
+      "homeroomTeacher": "体验教师",
+      "homeroomUsername": "teacher_li",
+      "studentCount": 45,
+      "isTemplate": true,
+      "createdAt": "2026-09-01"
+    }
+  ],
+  "users": [
+    {
+      "id": "user_admin",
+      "username": "admin",
+      "password": "admin",
+      "role": "admin",
+      "name": "超级管理员",
+      "status": "approved",
+      "classId": null,
+      "phone": "13800000000"
+    },
+    {
+      "id": "user_demo_li",
+      "username": "teacher_li",
+      "password": "123",
+      "role": "demo_teacher",
+      "name": "体验教师",
+      "realName": "体验教师",
+      "isDemo": true,
+      "status": "approved",
+      "classId": "class_demo_template",
+      "className": "【示范体验】班级默认模板",
+      "grade": "小学四年级"
+    }
+  ],
+  "subjectTeachers": [
+    {
+      "id": "st_demo",
+      "classId": "class_demo_template",
+      "name": "体验教师(数学)",
+      "subject": "数学",
+      "username": "math_wang",
+      "password": "123",
+      "isDemo": true,
+      "createdAt": "2026-09-02"
+    }
+  ]
+}
