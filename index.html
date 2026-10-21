@@ -3347,7 +3347,12 @@
         }
       }
       syncSystemClock();
-      setInterval(syncSystemClock, 30000);
+      // URL view parameter routing support
+      window.addEventListener('DOMContentLoaded', () => {
+        const p = new URLSearchParams(window.location.search);
+        const v = p.get('view');
+        if (v) setTimeout(() => { if (window.switchView) window.switchView(v); }, 300);
+      });
     })();
   </script>
 </body>

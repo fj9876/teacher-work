@@ -6204,6 +6204,21 @@ function bootApp() {
     savedUser = JSON.parse(localStorage.getItem("HOMEROOM_CURRENT_USER") || "null");
   } catch(e) {}
 
+  // 若携带 demo=1 或 preview=1，自动以示范体验教师身份进入，隐藏登录悬浮弹窗
+  const isDemoMode = urlParams.get("demo") === "1" || urlParams.get("preview") === "1";
+  if (isDemoMode) {
+    savedUser = {
+      id: "user_demo_li",
+      username: "teacher_li",
+      name: "体验教师",
+      realName: "体验教师",
+      role: "homeroom_teacher",
+      isDemo: true,
+      classId: "class_demo_template"
+    };
+    sessionStorage.setItem("HOMEROOM_LOGGED_IN", "true");
+  }
+
   // 若由后台超级管理中心携带管理员授权一键跳转进入，自动完成特权接管免密登录
   if (isAdminEntry && savedUser && savedUser.role === "admin") {
     sessionStorage.setItem("HOMEROOM_LOGGED_IN", "true");
