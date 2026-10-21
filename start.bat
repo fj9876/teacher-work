@@ -8,14 +8,21 @@ echo    Starting Homeroom Teacher Workbench Server ...
 echo ========================================================
 echo.
 
-:: 1. Try project virtual environment (.venv) if present
+:: 1. Default to project standalone virtual environment (.venv)
+if exist "%~dp0.venv\Scripts\activate.bat" (
+    echo [INFO] Activating project virtual environment (.venv)...
+    call "%~dp0.venv\Scripts\activate.bat"
+    python server.py
+    goto end
+)
+
 if exist "%~dp0.venv\Scripts\python.exe" (
-    echo [INFO] Virtual environment detected. Launching server...
+    echo [INFO] Project virtual environment detected. Launching server...
     "%~dp0.venv\Scripts\python.exe" server.py
     goto end
 )
 
-:: 2. Try system python
+:: 2. Fallback to system-wide Python installation
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo [INFO] System Python detected. Launching server...
@@ -23,7 +30,7 @@ if %errorlevel% equ 0 (
     goto end
 )
 
-:: 3. Try Windows py launcher
+:: 3. Fallback to Windows py launcher
 py --version >nul 2>&1
 if %errorlevel% equ 0 (
     echo [INFO] Windows Python launcher detected. Launching server...
